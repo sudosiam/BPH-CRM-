@@ -19,6 +19,15 @@ npm start
 
 Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then rebuild. The app uses Supabase Auth, the SQL in `supabase/migrations`, and Realtime instead of the included server. Schedule `supabase/functions/followup-digest` hourly with the service role and the same VAPID keys the app uses.
 
+## Vercel
+
+Import this repo in Vercel with the root directory as the repository root. `vercel.json` builds `apps/web` and publishes `apps/web/dist`. Add these environment variables before the first deploy, then redeploy:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+In the Supabase dashboard, add the Vercel address under Authentication → URL configuration so sign-up confirmation can return to the site.
+
 ## Design
 
 The visual spec and product rules are in [docs/DESIGN.md](docs/DESIGN.md). The clickable prototype in `prototype/` is the earlier design pass.
