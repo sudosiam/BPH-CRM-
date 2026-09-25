@@ -4,10 +4,6 @@ import { useBook, type Draft } from "./book";
 import type { Lead, Profile } from "./types";
 import { APP_VERSION } from "./version";
 
-export function Mark({ large = false }: { large?: boolean }) {
-  return <img className={large ? "brand-mark large" : "brand-mark"} src="/logo.png" alt="BPH CRM" />;
-}
-
 const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
 
 function tone(name: string) {
@@ -21,9 +17,15 @@ function telHref(phone: string) {
   return digits ? `tel:${digits}` : "";
 }
 
-function waHref(phone: string) {
+function waHref(phone: string, message: string) {
   const digits = phone.replace(/\D/g, "");
-  return digits ? `https://wa.me/${digits}` : "";
+  if (!digits) return "";
+  const text = message.trim();
+  return text ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : `https://wa.me/${digits}`;
+}
+
+function fillTemplate(template: string, name: string) {
+  return template.replaceAll("{name}", name.trim() || "there");
 }
 
 function labelStatus(status: Lead["status"]) {
@@ -43,7 +45,7 @@ export function AuthScreen() {
   const [password, setPassword] = useState("");
   return (
     <section className="auth">
-      <Mark large />
+      <p className="wordmark">BPH</p>
       <h1>Sign in</h1>
       <p className="lede">Your leads stay on this phone and sync with the team.</p>
       <label className="field">
@@ -74,7 +76,7 @@ export function SignupScreen() {
   const [password, setPassword] = useState("");
   return (
     <section className="auth">
-      <Mark large />
+      <p className="wordmark">BPH</p>
       <h1>Create an account</h1>
       <p className="lede">Then start a business or join one with a code.</p>
       <label className="field">
@@ -108,7 +110,7 @@ export function StartScreen() {
   const [displayName, setDisplayName] = useState(book.me?.displayName || "");
   return (
     <section className="auth">
-      <Mark large />
+      <p className="wordmark">BPH</p>
       <h1>Start a business</h1>
       <p className="lede">You become the owner of a shared book. Teammates join with a code.</p>
       <label className="field">
@@ -138,9 +140,9 @@ export function JoinScreen() {
   const [displayName, setDisplayName] = useState(book.me?.displayName || "");
   return (
     <section className="auth">
-      <Mark large />
+      <p className="wordmark">BPH</p>
       <h1>Join with a code</h1>
-      <p className="lede">The code is on a teammate's You tab.</p>
+      <p className="lede">The code is in a teammate's Settings.</p>
       <label className="field">
         <span>Invite code</span>
         <input maxLength={12} autoCapitalize="characters" value={code} onChange={(event) => setCode(event.target.value)} />
@@ -162,28 +164,42 @@ export function JoinScreen() {
   );
 }
 
+export function OpeningScreen() {
+  return (
+    <section className="boot" aria-busy="true">
+      <div className="spinner" aria-hidden="true" />
+      <h1>Opening your book</h1>
+      <p className="lede">Checking this phone for the latest leads.</p>
+    </section>
+  );
+}
+
 export function CopyScreen() {
   const book = useBook();
   const failed = book.phase === "copy-error";
   return (
     <section className="boot" aria-busy={!failed}>
-      <Mark large />
-      <h1>{failed ? "Couldn't finish" : "Copying the full book onto this phone"}</h1>
+      {failed ? null : <div className="spinner" aria-hidden="true" />}
+      <h1>{failed ? "The copy didn't finish" : "Saving the book on this phone"}</h1>
       <p className="lede">
         {failed
-          ? "Check your connection and try again."
-          : "BPH opens from this copy so the app stays instant. This happens once on each phone."}
+          ? "The connection dropped before every lead arrived. Nothing was lost on the team."
+          : "This happens once on each phone. After that, Today opens straight away."}
       </p>
       {failed ? null : (
-        <div className="track" aria-hidden="true">
-          <div id="boot-bar" style={{ width: `${book.copyPct}%` }} />
-        </div>
+        <>
+          <div className="track" aria-hidden="true">
+            <div id="boot-bar" style={{ width: `${book.copyPct}%` }} />
+          </div>
+          <p className="meta">
+            {book.copyLabel} · {Math.round(book.copyPct)}%
+          </p>
+        </>
       )}
-      <p className="meta">{failed ? "" : book.copyLabel}</p>
       {failed ? (
         <div className="form-actions">
           <button className="primary" type="button" onClick={() => void book.retryCopy()}>
-            Retry
+            Try again
           </button>
         </div>
       ) : null}
@@ -425,7 +441,7 @@ export function DetailScreen() {
             <a className="ghost wide" href={telHref(lead.phone)}>
               Call
             </a>
-            <a className="ghost wide" href={waHref(lead.phone)} target="_blank" rel="noopener">
+            <a className="ghost wide" href={waHref(lead.phone, fillTemplate(book.waTemplate, lead.name))} target="_blank" rel="noopener">
               WhatsApp
             </a>
           </div>
@@ -555,26 +571,36 @@ export function EditScreen() {
   );
 }
 
+const REMINDER_SHORTCUTS = [420, 480, 540, 1080];
+
+function clock(minute: number) {
+  const safe = ((minute % 1440) + 1440) % 1440;
+  return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
+}
+
 export function AccountScreen() {
   const book = useBook();
   if (!book.me || !book.org) return null;
   const today = todayISO(book.me.timezone);
   const counts = digestCounts(book.leads, book.me.id, today);
   const line = digestLine(counts.today, counts.overdue);
-  const time = `${String(Math.floor(book.me.notifyMinute / 60)).padStart(2, "0")}:${String(book.me.notifyMinute % 60).padStart(2, "0")}`;
+  const time = clock(book.me.notifyMinute);
   const code = book.org.inviteCode;
+  const preview = fillTemplate(book.waTemplate, "Customer");
   return (
-    <>
-      <h1>Settings</h1>
+    <div className="settings">
       <section className="part">
         <p className="part-label">You</p>
         <div className="card-block settings-hero">
-          <Mark />
+          <span className="avatar settings-avatar" style={{ background: tone(book.me.displayName) }}>
+            {initials(book.me.displayName)}
+          </span>
           <div>
             <h2>{book.me.displayName}</h2>
             <p className="meta">
               {book.me.role === "owner" ? "Owner" : "Member"} · {book.org.name}
             </p>
+            {book.email ? <p className="meta">{book.email}</p> : null}
           </div>
         </div>
       </section>
@@ -636,55 +662,81 @@ export function AccountScreen() {
       <section className="part">
         <p className="part-label">Reminders</p>
         <div className="card-block">
-          <h2>Morning alert</h2>
-          <p className="meta">One alert for your overdue follow-ups and anything due today.</p>
+          <h2>Daily alert</h2>
+          <p className="meta">One alert for your overdue follow-ups and anything due that day.</p>
           <label className="switch-row">
             <span>Alerts</span>
             <input type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
           </label>
           <label className="field">
             <span>Time</span>
-            <select
-              value={String(book.me.notifyMinute)}
-              onChange={(event) => void book.setReminderTime(Number(event.target.value))}
-            >
-              {[420, 480, 540, 1080].map((minute) => (
-                <option key={minute} value={minute}>
-                  {`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}
-                </option>
-              ))}
-            </select>
+            <input
+              type="time"
+              value={time}
+              onChange={(event) => {
+                const [hour, minute] = event.target.value.split(":").map(Number);
+                if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+                void book.setReminderTime(hour * 60 + minute);
+              }}
+            />
           </label>
-          <p className="hint">Install BPH to your home screen so alerts can arrive while the app is closed.</p>
+          <div className="chips">
+            {REMINDER_SHORTCUTS.map((minute) => (
+              <button
+                key={minute}
+                type="button"
+                className={`chip ${book.me?.notifyMinute === minute ? "on" : ""}`}
+                onClick={() => void book.setReminderTime(minute)}
+              >
+                {clock(minute)}
+              </button>
+            ))}
+          </div>
+          <p className="hint">Pick any time. Add BPH to your home screen so the alert can arrive while the app is closed.</p>
           <div className="push-preview">
             <div className="push-top">
               <span>BPH</span>
               <span>{time}</span>
             </div>
             <p className="push-title">Follow-ups</p>
-            <p className="push-body">{line || "No alert that morning. BPH stays quiet when nothing is due."}</p>
+            <p className="push-body">{line || "Quiet that day. Nothing of yours is due."}</p>
           </div>
+        </div>
+      </section>
+      <section className="part">
+        <p className="part-label">WhatsApp</p>
+        <div className="card-block">
+          <h2>Message template</h2>
+          <p className="meta">Used when you open WhatsApp from a lead. {"{name}"} becomes their name.</p>
+          <label className="field">
+            <span>Template</span>
+            <textarea
+              maxLength={500}
+              value={book.waTemplate}
+              onChange={(event) => book.setWaTemplate(event.target.value)}
+            />
+          </label>
+          <p className="hint">Preview: {preview}</p>
         </div>
       </section>
       <section className="part">
         <p className="part-label">This phone</p>
         <div className="card-block">
           <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
-          <p className="meta">The full book stays on this phone. Your changes show up right away, then sync to the team. A teammate’s new customer shows up here too.</p>
+          <p className="meta">The full book stays on this phone. Changes show up here right away, then reach the rest of the team.</p>
           <p className="meta">{book.leads.length} leads on this phone</p>
         </div>
       </section>
       <section className="part">
         <p className="part-label">About</p>
         <div className="card-block about-block">
-          <Mark large />
           <p className="version">Version {APP_VERSION}</p>
           <p className="meta">Biswajit Power Hub</p>
         </div>
-        <button className="linkish" type="button" onClick={() => void book.signOut()}>
+        <button className="ghost wide signout" type="button" onClick={() => void book.signOut()}>
           Sign out
         </button>
       </section>
-    </>
+    </div>
   );
 }

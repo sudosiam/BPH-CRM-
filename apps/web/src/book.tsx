@@ -44,7 +44,8 @@ type BookValue = {
   setSegment: (segment: Lead["status"]) => void;
   setScope: (scope: "mine" | "all") => void;
   clearError: () => void;
-  goTab: (screen: "today" | "leads" | "account") => void;
+  goTab: (screen: "today" | "leads") => void;
+  openSettings: () => void;
   openLead: (id: string) => void;
   back: () => void;
   startDraft: () => void;
@@ -64,6 +65,8 @@ type BookValue = {
   deleteLead: () => Promise<void>;
   setReminders: (enabled: boolean) => Promise<void>;
   setReminderTime: (minute: number) => Promise<void>;
+  waTemplate: string;
+  setWaTemplate: (value: string) => void;
   regenerateCode: () => Promise<void>;
   removeMember: (id: string) => Promise<void>;
   showToast: (text: string) => void;
@@ -71,6 +74,16 @@ type BookValue = {
 };
 
 const BookContext = createContext<BookValue | null>(null);
+const WA_KEY = "bph-wa-template";
+export const DEFAULT_WA_TEMPLATE = "Hi {name}, this is Biswajit Power Hub. Just following up.";
+
+function readWaTemplate() {
+  try {
+    return localStorage.getItem(WA_KEY) ?? DEFAULT_WA_TEMPLATE;
+  } catch {
+    return DEFAULT_WA_TEMPLATE;
+  }
+}
 
 function zone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -94,6 +107,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState("");
   const [email, setEmail] = useState("");
   const [pushActive, setPushActive] = useState(false);
+  const [waTemplate, setWaTemplateState] = useState(readWaTemplate);
   const leads = (useLiveQuery(() => db.leads.toArray(), [], []) ?? []).filter((lead) => !lead.deletedAt);
   const profiles = useLiveQuery(() => db.profiles.toArray(), [], []) ?? [];
   const outboxCount = useLiveQuery(() => db.outbox.count(), [], 0) ?? 0;
@@ -262,6 +276,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
     clearError: () => setError(""),
     goTab(next) {
       setStack([next]);
+      setSheet(null);
+    },
+    openSettings() {
+      setStack((current) => {
+        const root = current.find((screen) => screen === "today" || screen === "leads") ?? "today";
+        return [root, "account"];
+      });
       setSheet(null);
     },
     openLead(id) {
@@ -441,8 +462,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     async setReminderTime(minute) {
       if (!me) return;
-      const profile = await remote.updateProfile({ ...me, notifyMinute: minute });
+      const next = Math.max(0, Math.min(1439, Math.round(minute)));
+      const profile = await remote.updateProfile({ ...me, notifyMinute: next });
       await db.profiles.put(profile);
+    },
+    waTemplate,
+    setWaTemplate(value) {
+      const next = value.slice(0, 500);
+      setWaTemplateState(next);
+      try {
+        localStorage.setItem(WA_KEY, next);
+      } catch {
+        /* Private browsing can block storage. The template still applies until refresh. */
+      }
     },
     async regenerateCode() {
       const inviteCode = await remote.regenerateCode();
