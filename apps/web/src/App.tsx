@@ -169,7 +169,7 @@ function Shell() {
           </>
         ) : (
           <>
-            <span className="header-side" />
+            <h1 className="header-heading">{book.screen === "leads" ? "Leads" : "Today"}</h1>
             <div className="header-tools">
               <span className="sync-label">{syncLabel}</span>
               <button className="settings-btn" type="button" aria-label="Settings" onClick={book.openSettings}>

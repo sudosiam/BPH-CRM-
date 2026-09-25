@@ -221,7 +221,6 @@ export function TodayScreen() {
   return (
     <>
       <p className="date-line">{longDate(today)}</p>
-      <h1>Today</h1>
       {due.length || overdue.length ? (
         <p className="summary">
           {due.length ? <span className="today-due">{due.length} due today</span> : null}
@@ -329,7 +328,6 @@ export function LeadsScreen() {
         : "No open leads yet";
   return (
     <>
-      <h1>Leads</h1>
       <div className="segments">
         {(["lead", "sold", "lost"] as const).map((status) => (
           <button key={status} type="button" className={book.segment === status ? "on" : ""} onClick={() => book.setSegment(status)}>
