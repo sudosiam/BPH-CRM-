@@ -1,6 +1,13 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Account, Lead, Org, Profile, Pull, PushResult } from "./types";
 
+export function resolveSupabaseUrl(value: string | undefined) {
+  const raw = String(value ?? "").trim().replace(/\/$/, "");
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}.supabase.co`;
+}
+
 function mapLead(row: Record<string, unknown>): Lead {
   return {
     id: String(row.id),
@@ -82,7 +89,7 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
 }
 
 export function createSupabaseRemote() {
-  const supabase = createClient(import.meta.env.VITE_SUPABASE_URL || "", import.meta.env.VITE_SUPABASE_ANON_KEY || "", {
+  const supabase = createClient(resolveSupabaseUrl(import.meta.env.VITE_SUPABASE_URL), import.meta.env.VITE_SUPABASE_ANON_KEY || "", {
     auth: { persistSession: true, autoRefreshToken: true },
   });
 
