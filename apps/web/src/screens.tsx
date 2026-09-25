@@ -35,7 +35,7 @@ function labelStatus(status: Lead["status"]) {
 }
 
 function ownerName(profiles: Profile[], id: string, me: Profile | null) {
-  if (me?.id === id) return me.displayName;
+  if (me?.id === id) return "You";
   return profiles.find((profile) => profile.id === id)?.displayName ?? "Teammate";
 }
 
@@ -50,11 +50,11 @@ export function AuthScreen() {
       <p className="lede">Your leads stay on this phone and sync with the team.</p>
       <label className="field">
         <span>Email</span>
-        <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
+        <input type="email" autoComplete="username" placeholder="you@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
       </label>
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input type="password" autoComplete="current-password" placeholder="Your password" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
@@ -81,15 +81,15 @@ export function SignupScreen() {
       <p className="lede">Then start a business or join one with a code.</p>
       <label className="field">
         <span>Your name</span>
-        <input maxLength={80} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <input maxLength={80} placeholder="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
       </label>
       <label className="field">
         <span>Email</span>
-        <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} />
+        <input type="email" autoComplete="username" placeholder="you@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
       </label>
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
@@ -115,11 +115,11 @@ export function StartScreen() {
       <p className="lede">You become the owner of a shared book. Teammates join with a code.</p>
       <label className="field">
         <span>Business name</span>
-        <input maxLength={80} value={name} onChange={(event) => setName(event.target.value)} />
+        <input maxLength={80} placeholder="Shop or company" value={name} onChange={(event) => setName(event.target.value)} />
       </label>
       <label className="field">
         <span>Your name</span>
-        <input maxLength={80} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <input maxLength={80} placeholder="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
@@ -145,11 +145,11 @@ export function JoinScreen() {
       <p className="lede">The code is in a teammate's Settings.</p>
       <label className="field">
         <span>Invite code</span>
-        <input maxLength={12} autoCapitalize="characters" value={code} onChange={(event) => setCode(event.target.value)} />
+        <input maxLength={12} autoCapitalize="characters" placeholder="ABCD1234" value={code} onChange={(event) => setCode(event.target.value)} />
       </label>
       <label className="field">
         <span>Your name</span>
-        <input maxLength={80} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <input maxLength={80} placeholder="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
@@ -343,7 +343,6 @@ export function LeadsScreen() {
         autoComplete="off"
         onChange={(event) => book.setQuery(event.target.value)}
       />
-      <div style={{ height: 14 }} />
       {rows.length ? (
         <div className="group">
           {rows.map((lead) => {
@@ -407,9 +406,7 @@ export function DetailScreen() {
       {lead.status === "lead" ? (
         <div className="card-block">
           <h2>Follow-up</h2>
-          <p className={due.className} style={{ fontWeight: 700 }}>
-            {due.text}
-          </p>
+          <p className={`due-line ${due.className}`}>{due.text}</p>
           <FollowChips selected={lead.followUpOn} today={today} onPick={(iso) => void book.setFollowUp(iso)} />
           <label className="field">
             <span>Date</span>
@@ -531,7 +528,7 @@ export function EditScreen() {
       )}
       <label className="field">
         <span>Notes</span>
-        <textarea maxLength={2000} value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
+        <textarea maxLength={2000} placeholder="Optional" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
       </label>
       <label className="field">
         <span>Owner</span>
@@ -654,7 +651,7 @@ export function AccountScreen() {
           <p className="meta">One alert for the team's overdue follow-ups and anything due that day.</p>
           <label className="switch-row">
             <span>Alerts</span>
-            <input type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
+            <input className="switch" type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
           </label>
           <label className="field">
             <span>Time</span>
@@ -687,7 +684,7 @@ export function AccountScreen() {
               <span>{time}</span>
             </div>
             <p className="push-title">Follow-ups</p>
-            <p className="push-body">{line || "Quiet that day. Nothing of yours is due."}</p>
+            <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
           </div>
         </div>
       </section>

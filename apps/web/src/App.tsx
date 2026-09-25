@@ -60,7 +60,7 @@ function Shell() {
   const showFab = book.screen === "today" || book.screen === "leads";
   const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
   const badge = dueCounts.today + dueCounts.overdue;
-  const syncLabel = book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced";
+  const syncLabel = book.sync === "syncing" ? "Syncing" : book.sync === "saved" ? "On phone" : "Synced";
   const lead = book.leads.find((item) => item.id === book.detailId);
   const [shift, setShift] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -171,7 +171,7 @@ function Shell() {
           <>
             <h1 className="header-heading">{book.screen === "leads" ? "Leads" : "Today"}</h1>
             <div className="header-tools">
-              <span className="sync-label">{syncLabel}</span>
+              <span className={`sync-label ${book.sync}`}>{syncLabel}</span>
               <button className="settings-btn" type="button" aria-label="Settings" onClick={book.openSettings}>
                 <IconSettings />
               </button>
