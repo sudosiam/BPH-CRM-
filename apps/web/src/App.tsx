@@ -67,6 +67,8 @@ function Shell() {
   const drag = useRef<{ x: number; y: number; pointerId: number; armed: boolean } | null>(null);
   const shiftRef = useRef(0);
   const swipeLock = useRef(false);
+  const edgeRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<HTMLElement>(null);
 
   useSystemBack(book.phase === "app" ? book.navDepth : 0, () => {
     if (book.sheet) book.setSheet(null);
@@ -92,41 +94,56 @@ function Shell() {
     }, 420);
   }
 
-  return (
-    <div
-      id="app"
-      onPointerDown={(event) => {
-        if (book.navDepth < 1 || event.button !== 0 || swipeLock.current) return;
-        if (event.clientX > 28) return;
-        const target = event.target;
-        if (target instanceof Element && target.closest("input, textarea, select, a, button")) return;
-        drag.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, armed: false };
-      }}
-      onPointerMove={(event) => {
-        const start = drag.current;
-        if (!start || start.pointerId !== event.pointerId) return;
-        const dx = event.clientX - start.x;
-        const dy = event.clientY - start.y;
-        if (!start.armed) {
-          if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {
-            drag.current = null;
-            setDragging(false);
-            moveShift(0);
-            return;
-          }
-          if (dx < 12 || Math.abs(dx) <= Math.abs(dy)) return;
-          start.armed = true;
-          setDragging(true);
-          event.currentTarget.setPointerCapture(event.pointerId);
+  useEffect(() => {
+    viewRef.current?.scrollTo(0, 0);
+  }, [book.screen, book.phase]);
+
+  useEffect(() => {
+    const edge = edgeRef.current;
+    if (!edge || book.navDepth < 1) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0 || swipeLock.current) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("input, textarea, select, a, button")) return;
+      drag.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, armed: false };
+    };
+    const onMove = (event: PointerEvent) => {
+      const start = drag.current;
+      if (!start || start.pointerId !== event.pointerId) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (!start.armed) {
+        if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {
+          drag.current = null;
+          setDragging(false);
+          moveShift(0);
+          return;
         }
-        moveShift(Math.max(0, Math.min(dx, 168)));
-      }}
-      onPointerUp={(event) => {
-        if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-        endSwipe(true);
-      }}
-      onPointerCancel={() => endSwipe(false)}
-    >
+        if (dx < 12 || Math.abs(dx) <= Math.abs(dy)) return;
+        start.armed = true;
+        setDragging(true);
+      }
+      moveShift(Math.max(0, Math.min(dx, 168)));
+    };
+    const onUp = (event: PointerEvent) => {
+      if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+      endSwipe(true);
+    };
+    const onCancel = () => endSwipe(false);
+    edge.addEventListener("pointerdown", onDown, { passive: true });
+    edge.addEventListener("pointermove", onMove, { passive: true });
+    edge.addEventListener("pointerup", onUp, { passive: true });
+    edge.addEventListener("pointercancel", onCancel, { passive: true });
+    return () => {
+      edge.removeEventListener("pointerdown", onDown);
+      edge.removeEventListener("pointermove", onMove);
+      edge.removeEventListener("pointerup", onUp);
+      edge.removeEventListener("pointercancel", onCancel);
+    };
+  }, [book.navDepth, book.sheet, book.back]);
+
+  return (
+    <div id="app">
       <header id="header" className={bare ? "bare" : ""}>
         {bare ? null : book.screen === "detail" || book.screen === "edit" ? (
           <>
@@ -162,14 +179,15 @@ function Shell() {
           </>
         )}
       </header>
-      <main
-        id="view"
-        className={`${tabbed ? "with-tabs" : ""} ${tabbed && showFab ? "with-fab" : ""}`}
-        style={{
-          transform: shift ? `translate3d(${shift}px, 0, 0)` : undefined,
-          transition: dragging ? "none" : "transform 180ms ease",
-        }}
-      >
+      {book.navDepth > 0 ? <div className="edge-swipe" ref={edgeRef} /> : null}
+      <main ref={viewRef} id="view" className={`${tabbed ? "with-tabs" : ""} ${tabbed && showFab ? "with-fab" : ""}`}>
+        <div
+          id="page"
+          style={{
+            transform: shift ? `translate3d(${shift}px, 0, 0)` : undefined,
+            transition: dragging ? "none" : "transform 180ms ease",
+          }}
+        >
         {book.phase === "loading" ? <OpeningScreen /> : null}
         {book.phase === "auth" ? <AuthScreen /> : null}
         {book.phase === "signup" ? <SignupScreen /> : null}
@@ -181,6 +199,7 @@ function Shell() {
         {book.phase === "app" && book.screen === "account" ? <AccountScreen /> : null}
         {book.phase === "app" && book.screen === "detail" ? <DetailScreen /> : null}
         {book.phase === "app" && book.screen === "edit" ? <EditScreen /> : null}
+        </div>
       </main>
       {tabbed ? (
         <nav id="tabbar">
