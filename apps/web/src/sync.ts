@@ -55,6 +55,17 @@ export async function queueLead(next: Lead, baseVersion: number | null) {
   });
 }
 
+let syncChain: Promise<unknown> = Promise.resolve();
+
+export function enqueueSync<T>(task: () => Promise<T>): Promise<T> {
+  const run = syncChain.then(task, task);
+  syncChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export async function flushOutbox(onNotice: (message: string) => void) {
   const meta = await db.meta.get("local");
   if (!meta?.fullSyncComplete) return;

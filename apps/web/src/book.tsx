@@ -5,7 +5,7 @@ import { db, resetLocal } from "./db";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
-import { flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
+import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "start" | "join" | "copy" | "copy-error" | "app";
@@ -129,17 +129,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
     });
   }
 
-  async function syncNow() {
-    setSyncing(true);
-    try {
-      await flushOutbox(showToast);
-      await runIncremental();
-      setHeld(false);
-    } catch {
-      setHeld(true);
-    } finally {
-      setSyncing(false);
-    }
+  function syncNow() {
+    return enqueueSync(async () => {
+      setSyncing(true);
+      try {
+        await flushOutbox(showToast);
+        await runIncremental();
+        setHeld(false);
+      } catch {
+        setHeld(true);
+      } finally {
+        setSyncing(false);
+      }
+    });
   }
 
   async function openAccount(account: Account, forceCopy: boolean) {
@@ -456,7 +458,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
 
   async function finishSignOut() {
     try {
-      await flushOutbox(() => {});
+      await enqueueSync(() => flushOutbox(() => {}));
     } catch {
       /* Clearing the phone copy is still the right next step. */
     }

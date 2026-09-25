@@ -499,40 +499,36 @@ export function createBook(dataFile) {
       const problem = validateLead(input, auth);
       if (problem) return send(res, 400, { error: problem });
       const now = new Date().toISOString();
-      const existing = state.leads.find((lead) => lead.id === input.id);
-      if (!existing) {
-        if (body.baseVersion != null) return send(res, 409, { error: "conflict", lead: null, deleted: true });
-        const lead = {
-          id: String(input.id),
-          orgId: auth.org.id,
-          name: String(input.name).trim(),
-          phone: String(input.phone ?? "").trim(),
-          notes: String(input.notes ?? ""),
-          status: input.status,
-          followUpOn: input.followUpOn || null,
-          closedOn: input.closedOn || null,
-          ownerId: input.ownerId,
-          createdBy: auth.user.id,
-          updatedBy: auth.user.id,
-          version: 1,
-          createdAt: now,
-          updatedAt: now,
-          deletedAt: null,
-        };
-        await mutate(async () => {
+      const result = await mutate(async () => {
+        const existing = state.leads.find((lead) => lead.id === input.id);
+        if (!existing) {
+          if (body.baseVersion != null) return { status: 409, body: { error: "conflict", lead: null, deleted: true } };
+          const lead = {
+            id: String(input.id),
+            orgId: auth.org.id,
+            name: String(input.name).trim(),
+            phone: String(input.phone ?? "").trim(),
+            notes: String(input.notes ?? ""),
+            status: input.status,
+            followUpOn: input.followUpOn || null,
+            closedOn: input.closedOn || null,
+            ownerId: input.ownerId,
+            createdBy: auth.user.id,
+            updatedBy: auth.user.id,
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null,
+          };
           state.leads.push(lead);
           persist();
-        });
-        broadcast(auth.org.id);
-        send(res, 200, { lead: publicLead(lead) });
-        return;
-      }
-      if (existing.orgId !== auth.org.id) return send(res, 404, { error: "This lead is gone." });
-      if (existing.deletedAt) return send(res, 409, { error: "conflict", lead: publicLead(existing), deleted: true });
-      if (existing.version !== body.baseVersion) {
-        return send(res, 409, { error: "conflict", lead: publicLead(existing), deleted: false });
-      }
-      await mutate(async () => {
+          return { status: 200, body: { lead: publicLead(lead) }, orgId: auth.org.id };
+        }
+        if (existing.orgId !== auth.org.id) return { status: 404, body: { error: "This lead is gone." } };
+        if (existing.deletedAt) return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+        if (existing.version !== body.baseVersion) {
+          return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: false } };
+        }
         existing.name = String(input.name).trim();
         existing.phone = String(input.phone ?? "").trim();
         existing.notes = String(input.notes ?? "");
@@ -545,9 +541,10 @@ export function createBook(dataFile) {
         existing.updatedAt = now;
         if (input.deletedAt) existing.deletedAt = now;
         persist();
+        return { status: 200, body: { lead: publicLead(existing) }, orgId: auth.org.id };
       });
-      broadcast(auth.org.id);
-      send(res, 200, { lead: publicLead(existing) });
+      if (result.orgId) broadcast(result.orgId);
+      send(res, result.status, result.body);
       return;
     }
 
