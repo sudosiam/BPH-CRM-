@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { BookProvider, useBook } from "./book";
 import { IconBack, IconLeads, IconPlus, IconToday, IconYou } from "./icons";
 import { digestCounts, todayISO } from "@shared/book.mjs";
@@ -9,10 +10,48 @@ import {
   EditScreen,
   JoinScreen,
   LeadsScreen,
+  Mark,
   SignupScreen,
   StartScreen,
   TodayScreen,
 } from "./screens";
+
+function useSystemBack(depth: number, onBack: () => void) {
+  const onBackRef = useRef(onBack);
+  const depthRef = useRef(depth);
+  const tracked = useRef(0);
+  const skip = useRef(0);
+  onBackRef.current = onBack;
+  depthRef.current = depth;
+
+  useEffect(() => {
+    const onPop = () => {
+      if (skip.current > 0) {
+        skip.current -= 1;
+        return;
+      }
+      if (depthRef.current <= 0) return;
+      tracked.current = Math.max(0, depthRef.current - 1);
+      onBackRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    const delta = depth - tracked.current;
+    if (delta > 0) {
+      for (let i = 0; i < delta; i += 1) history.pushState({ bph: true }, "");
+      tracked.current = depth;
+      return;
+    }
+    if (delta < 0) {
+      skip.current += -delta;
+      tracked.current = depth;
+      history.go(delta);
+    }
+  }, [depth]);
+}
 
 function Shell() {
   const book = useBook();
@@ -23,9 +62,65 @@ function Shell() {
   const badge = mine.today + mine.overdue;
   const syncLabel = book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced";
   const lead = book.leads.find((item) => item.id === book.detailId);
+  const [shift, setShift] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ x: number; y: number } | null>(null);
+  const shiftRef = useRef(0);
+
+  useSystemBack(book.phase === "app" ? book.navDepth : 0, () => {
+    if (book.sheet) book.setSheet(null);
+    else book.back();
+  });
+
+  function moveShift(next: number) {
+    shiftRef.current = next;
+    setShift(next);
+  }
 
   return (
-    <div id="app">
+    <div
+      id="app"
+      onTouchStart={(event) => {
+        const installed =
+          window.matchMedia("(display-mode: standalone)").matches ||
+          (navigator as Navigator & { standalone?: boolean }).standalone === true;
+        if (!installed || book.navDepth < 1) return;
+        const touch = event.changedTouches[0];
+        if (!touch || touch.clientX > 28) return;
+        drag.current = { x: touch.clientX, y: touch.clientY };
+        setDragging(true);
+      }}
+      onTouchMove={(event) => {
+        const start = drag.current;
+        if (!start) return;
+        const touch = event.changedTouches[0];
+        if (!touch) return;
+        const dx = touch.clientX - start.x;
+        const dy = touch.clientY - start.y;
+        if (Math.abs(dy) > 18 && Math.abs(dy) > Math.abs(dx)) {
+          drag.current = null;
+          setDragging(false);
+          moveShift(0);
+          return;
+        }
+        moveShift(Math.max(0, Math.min(dx, 160)));
+      }}
+      onTouchEnd={() => {
+        const gone = shiftRef.current > 72;
+        drag.current = null;
+        setDragging(false);
+        moveShift(0);
+        if (gone) {
+          if (book.sheet) book.setSheet(null);
+          else book.back();
+        }
+      }}
+      onTouchCancel={() => {
+        drag.current = null;
+        setDragging(false);
+        moveShift(0);
+      }}
+    >
       <header id="header" className={bare ? "bare" : ""}>
         {bare ? null : book.screen === "detail" || book.screen === "edit" ? (
           <>
@@ -43,14 +138,21 @@ function Shell() {
           </>
         ) : (
           <>
-            <p className="brand">BPH</p>
+            <Mark />
             <button className="sync-btn" type="button" onClick={() => book.goTab("account")}>
               {syncLabel}
             </button>
           </>
         )}
       </header>
-      <main id="view" className={`${tabbed ? "with-tabs" : ""} ${tabbed && showFab ? "with-fab" : ""}`}>
+      <main
+        id="view"
+        className={`${tabbed ? "with-tabs" : ""} ${tabbed && showFab ? "with-fab" : ""}`}
+        style={{
+          transform: shift ? `translate3d(${shift}px, 0, 0)` : undefined,
+          transition: dragging ? "none" : "transform 180ms ease",
+        }}
+      >
         {book.phase === "loading" ? <p className="meta">Opening BPH…</p> : null}
         {book.phase === "auth" ? <AuthScreen /> : null}
         {book.phase === "signup" ? <SignupScreen /> : null}
@@ -76,7 +178,7 @@ function Shell() {
           </button>
           <button className={`tab ${book.screen === "account" ? "on" : ""}`} type="button" onClick={() => book.goTab("account")}>
             <IconYou />
-            You
+            Settings
           </button>
         </nav>
       ) : null}

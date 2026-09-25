@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, todayISO } from "@shared/book.mjs";
+import { addDays, nextCustomerName, todayISO } from "@shared/book.mjs";
 import { db, resetLocal } from "./db";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
@@ -67,6 +67,7 @@ type BookValue = {
   regenerateCode: () => Promise<void>;
   removeMember: (id: string) => Promise<void>;
   showToast: (text: string) => void;
+  navDepth: number;
 };
 
 const BookContext = createContext<BookValue | null>(null);
@@ -250,6 +251,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     segment,
     scope,
     query,
+    navDepth: Math.max(0, stack.length - 1) + (sheet ? 1 : 0),
     setPhase: (next) => {
       setError("");
       setPhase(next);
@@ -351,8 +353,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     confirmSignOut: finishSignOut,
     async saveDraft(next) {
-      const name = next.name.trim();
-      if (!name) throw new Error("Add a name.");
+      const typed = next.name.trim();
+      const name =
+        typed ||
+        nextCustomerName(leads.filter((lead) => lead.id !== next.id).map((lead) => lead.name));
       if (!org || !me) return;
       if (next.id) {
         const current = await db.leads.get(next.id);

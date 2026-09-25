@@ -27,6 +27,9 @@ html, body {
   font-family: var(--font);
   font-size: 16px;
   line-height: 1.4;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
 
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -41,6 +44,8 @@ a { color: inherit; }
   flex-direction: column;
   background: var(--paper);
   position: relative;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 #caption { display: none; }
@@ -83,17 +88,24 @@ a { color: inherit; }
   justify-content: space-between;
   gap: 12px;
   min-height: 56px;
-  padding: 8px 16px 0;
+  padding: calc(8px + env(safe-area-inset-top)) 16px 0;
   flex: 0 0 auto;
 }
 
 #header.bare { display: none; }
 
-.brand {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+.brand-mark {
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.brand-mark.large {
+  width: min(220px, 72%);
+  height: auto;
+  border-radius: 22px;
 }
 
 .icon-btn, .text-btn {
@@ -142,6 +154,8 @@ a { color: inherit; }
   overflow: auto;
   padding: 8px 16px 24px;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 #view.with-tabs { padding-bottom: 96px; }
@@ -467,8 +481,8 @@ h1 {
   padding-top: 36px;
 }
 
-.auth .brand { font-size: 28px; }
-.auth h1 { margin-top: 28px; }
+.auth .brand-mark { margin-top: 12px; }
+.auth h1 { margin-top: 22px; }
 .auth .lede { margin-top: 8px; }
 
 .boot {
@@ -562,6 +576,37 @@ h1 {
 }
 
 #fab svg { width: 24px; height: 24px; }
+
+.row-open, #fab, .primary, .chip, .call, .tab {
+  transition: transform 140ms ease, background 140ms ease;
+}
+.row-open:active, #fab:active, .primary:active, .chip:active, .call:active {
+  transform: scale(0.97);
+}
+
+.part { margin-top: 22px; }
+.part .card-block { margin-top: 0; }
+.part-label {
+  margin: 0 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.settings-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.settings-hero h2 { margin: 0; }
+.about-block { text-align: left; }
+.about-block .brand-mark { margin-bottom: 12px; }
+.version {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
 
 #toast {
   position: absolute;

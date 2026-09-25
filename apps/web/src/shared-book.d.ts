@@ -23,5 +23,6 @@ declare module "@shared/book.mjs" {
   export function longDate(iso: string): string;
   export function dueMeta(iso: string | null, today: string): { text: string; className: string };
   export function initials(name: string): string;
+  export function nextCustomerName(names: string[]): string;
   export function relativeTime(iso: string, now?: number): string;
 }

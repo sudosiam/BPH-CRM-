@@ -2,6 +2,11 @@ import { useState } from "react";
 import { addDays, dayDiff, digestCounts, digestLine, dueMeta, initials, longDate, prettyDate, relativeTime, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
 import type { Lead, Profile } from "./types";
+import { APP_VERSION } from "./version";
+
+export function Mark({ large = false }: { large?: boolean }) {
+  return <img className={large ? "brand-mark large" : "brand-mark"} src="/logo.png" alt="BPH CRM" />;
+}
 
 const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
 
@@ -38,7 +43,7 @@ export function AuthScreen() {
   const [password, setPassword] = useState("");
   return (
     <section className="auth">
-      <p className="brand">BPH</p>
+      <Mark large />
       <h1>Sign in</h1>
       <p className="lede">Your leads stay on this phone and sync with the team.</p>
       <label className="field">
@@ -69,7 +74,7 @@ export function SignupScreen() {
   const [password, setPassword] = useState("");
   return (
     <section className="auth">
-      <p className="brand">BPH</p>
+      <Mark large />
       <h1>Create an account</h1>
       <p className="lede">Then start a business or join one with a code.</p>
       <label className="field">
@@ -103,7 +108,7 @@ export function StartScreen() {
   const [displayName, setDisplayName] = useState(book.me?.displayName || "");
   return (
     <section className="auth">
-      <p className="brand">BPH</p>
+      <Mark large />
       <h1>Start a business</h1>
       <p className="lede">You become the owner of a shared book. Teammates join with a code.</p>
       <label className="field">
@@ -133,7 +138,7 @@ export function JoinScreen() {
   const [displayName, setDisplayName] = useState(book.me?.displayName || "");
   return (
     <section className="auth">
-      <p className="brand">BPH</p>
+      <Mark large />
       <h1>Join with a code</h1>
       <p className="lede">The code is on a teammate's You tab.</p>
       <label className="field">
@@ -162,7 +167,7 @@ export function CopyScreen() {
   const failed = book.phase === "copy-error";
   return (
     <section className="boot" aria-busy={!failed}>
-      <p className="brand">BPH</p>
+      <Mark large />
       <h1>{failed ? "Couldn't finish" : "Copying the full book onto this phone"}</h1>
       <p className="lede">
         {failed
@@ -500,8 +505,9 @@ export function EditScreen() {
     <>
       <label className="field">
         <span>Name</span>
-        <input maxLength={120} value={draft.name} placeholder="Person or business" onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+        <input maxLength={120} value={draft.name} placeholder="Optional" onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
       </label>
+      <p className="hint">Leave the name blank and BPH saves them as Customer 1, Customer 2, and so on.</p>
       <label className="field">
         <span>Phone</span>
         <input maxLength={40} inputMode="tel" value={draft.phone} placeholder="+880…" onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
@@ -559,101 +565,126 @@ export function AccountScreen() {
   const code = book.org.inviteCode;
   return (
     <>
-      <h1>You</h1>
-      <div className="card-block">
-        <h2>{book.me.displayName}</h2>
-        <p className="meta">
-          {book.me.role === "owner" ? "Owner" : "Member"} · {book.org.name}
-        </p>
-        {book.profiles
-          .filter((profile) => !profile.removedAt)
-          .map((profile) => (
-            <div className="team-row" key={profile.id}>
-              <strong>{profile.displayName}</strong>
-              <span>
-                {profile.id === book.me?.id ? "You · " : ""}
-                {profile.role === "owner" ? "Owner" : "Member"}
-                {book.me?.role === "owner" && profile.id !== book.me.id ? (
-                  <>
-                    {" "}
-                    <button className="text-btn" type="button" onClick={() => void book.removeMember(profile.id)}>
-                      Remove
-                    </button>
-                  </>
-                ) : null}
-              </span>
-            </div>
-          ))}
-        {book.me.role === "owner" && code ? (
-          <div className="code">
-            <span>
-              {code.slice(0, 4)} {code.slice(4)}
-            </span>
-            <button
-              className="text-btn"
-              type="button"
-              onClick={() => {
-                const write = navigator.clipboard?.writeText(code);
-                if (!write) {
-                  book.showToast(`Code ${code}`);
-                  return;
-                }
-                void write.then(
-                  () => book.showToast("Code copied"),
-                  () => book.showToast(`Code ${code}`),
-                );
-              }}
-            >
-              Copy
-            </button>
+      <h1>Settings</h1>
+      <section className="part">
+        <p className="part-label">You</p>
+        <div className="card-block settings-hero">
+          <Mark />
+          <div>
+            <h2>{book.me.displayName}</h2>
+            <p className="meta">
+              {book.me.role === "owner" ? "Owner" : "Member"} · {book.org.name}
+            </p>
           </div>
-        ) : null}
-        {book.me.role === "owner" ? (
-          <button className="linkish" type="button" onClick={() => void book.regenerateCode()}>
-            New invite code
-          </button>
-        ) : null}
-      </div>
-      <div className="card-block">
-        <h2>Reminders</h2>
-        <p className="meta">One morning alert for your overdue follow-ups and anything due today.</p>
-        <label className="switch-row">
-          <span>Alerts</span>
-          <input type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
-        </label>
-        <label className="field">
-          <span>Time</span>
-          <select
-            value={String(book.me.notifyMinute)}
-            onChange={(event) => void book.setReminderTime(Number(event.target.value))}
-          >
-            {[420, 480, 540, 1080].map((minute) => (
-              <option key={minute} value={minute}>
-                {`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="hint">On iPhone, install BPH to your home screen so alerts can arrive while the app is closed.</p>
-        <div className="push-preview">
-          <div className="push-top">
-            <span>BPH</span>
-            <span>{time}</span>
-          </div>
-          <p className="push-title">Follow-ups</p>
-          <p className="push-body">{line || "No alert that morning. BPH stays quiet when nothing is due."}</p>
         </div>
-      </div>
-      <div className="card-block">
-        <h2>On this phone</h2>
-        <p className="meta">BPH keeps the full book on this phone. Changes show up right away, then sync to the rest of the team.</p>
-        <p className="meta">
-          {book.leads.length} leads · {book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}
-        </p>
-      </div>
-      <button className="linkish" type="button" onClick={() => void book.signOut()}>
-        Sign out
-      </button>
+      </section>
+      <section className="part">
+        <p className="part-label">Team</p>
+        <div className="card-block">
+          {book.profiles
+            .filter((profile) => !profile.removedAt)
+            .map((profile) => (
+              <div className="team-row" key={profile.id}>
+                <strong>{profile.displayName}</strong>
+                <span>
+                  {profile.id === book.me?.id ? "You · " : ""}
+                  {profile.role === "owner" ? "Owner" : "Member"}
+                  {book.me?.role === "owner" && profile.id !== book.me.id ? (
+                    <>
+                      {" "}
+                      <button className="text-btn" type="button" onClick={() => void book.removeMember(profile.id)}>
+                        Remove
+                      </button>
+                    </>
+                  ) : null}
+                </span>
+              </div>
+            ))}
+          {book.me.role === "owner" && code ? (
+            <div className="code">
+              <span>
+                {code.slice(0, 4)} {code.slice(4)}
+              </span>
+              <button
+                className="text-btn"
+                type="button"
+                onClick={() => {
+                  const write = navigator.clipboard?.writeText(code);
+                  if (!write) {
+                    book.showToast(`Code ${code}`);
+                    return;
+                  }
+                  void write.then(
+                    () => book.showToast("Code copied"),
+                    () => book.showToast(`Code ${code}`),
+                  );
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          ) : null}
+          {book.me.role === "owner" ? (
+            <button className="linkish" type="button" onClick={() => void book.regenerateCode()}>
+              New invite code
+            </button>
+          ) : (
+            <p className="meta">Ask the owner for a new code if this one stops working.</p>
+          )}
+        </div>
+      </section>
+      <section className="part">
+        <p className="part-label">Reminders</p>
+        <div className="card-block">
+          <h2>Morning alert</h2>
+          <p className="meta">One alert for your overdue follow-ups and anything due today.</p>
+          <label className="switch-row">
+            <span>Alerts</span>
+            <input type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
+          </label>
+          <label className="field">
+            <span>Time</span>
+            <select
+              value={String(book.me.notifyMinute)}
+              onChange={(event) => void book.setReminderTime(Number(event.target.value))}
+            >
+              {[420, 480, 540, 1080].map((minute) => (
+                <option key={minute} value={minute}>
+                  {`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="hint">Install BPH to your home screen so alerts can arrive while the app is closed.</p>
+          <div className="push-preview">
+            <div className="push-top">
+              <span>BPH</span>
+              <span>{time}</span>
+            </div>
+            <p className="push-title">Follow-ups</p>
+            <p className="push-body">{line || "No alert that morning. BPH stays quiet when nothing is due."}</p>
+          </div>
+        </div>
+      </section>
+      <section className="part">
+        <p className="part-label">This phone</p>
+        <div className="card-block">
+          <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
+          <p className="meta">The full book stays on this phone. Your changes show up right away, then sync to the team. A teammate’s new customer shows up here too.</p>
+          <p className="meta">{book.leads.length} leads on this phone</p>
+        </div>
+      </section>
+      <section className="part">
+        <p className="part-label">About</p>
+        <div className="card-block about-block">
+          <Mark large />
+          <p className="version">Version {APP_VERSION}</p>
+          <p className="meta">Biswajit Power Hub</p>
+        </div>
+        <button className="linkish" type="button" onClick={() => void book.signOut()}>
+          Sign out
+        </button>
+      </section>
     </>
   );
 }

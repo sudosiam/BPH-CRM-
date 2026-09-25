@@ -105,6 +105,17 @@ export function initials(name) {
   );
 }
 
+export function nextCustomerName(names) {
+  let max = 0;
+  for (const name of names) {
+    const match = /^Customer (\d+)$/.exec(String(name ?? "").trim());
+    if (!match) continue;
+    const number = Number(match[1]);
+    if (number > max) max = number;
+  }
+  return `Customer ${max + 1}`;
+}
+
 export function relativeTime(iso, now = Date.now()) {
   const minutes = Math.round((now - new Date(iso).getTime()) / 60000);
   if (minutes < 1) return "Just now";
