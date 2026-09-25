@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "sh -c 'if [ -f apps/web/package.json ]; then npm install; else npm install --prefix .. --include=dev; fi'",
+  "installCommand": "sh -c 'if [ -f apps/web/package.json ]; then npm install; else npm install --prefix ../.. --include=dev; fi'",
   "buildCommand": "sh -c 'if [ -f apps/web/package.json ]; then npm --prefix apps/web run build && rm -rf dist && cp -a apps/web/dist dist; else npm run build; fi'",
   "outputDirectory": "dist",
   "headers": [
