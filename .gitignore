@@ -6,4 +6,5 @@ server/data/
 .env
 .env.*
 !.env.example
+!.env.production
 .vercel

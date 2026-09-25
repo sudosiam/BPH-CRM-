@@ -21,10 +21,7 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then rebuild. The app uses
 
 ## Vercel
 
-Import this repo in Vercel with the root directory as the repository root. `vercel.json` builds `apps/web` and publishes `apps/web/dist`. Add these environment variables before the first deploy, then redeploy:
-
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+Import this repo in Vercel with the root directory as the repository root. `vercel.json` builds `apps/web` and publishes `apps/web/dist`. The production build reads the public Supabase URL and anon key from `apps/web/.env.production`.
 
 In the Supabase dashboard, add the Vercel address under Authentication → URL configuration so sign-up confirmation can return to the site.
 
