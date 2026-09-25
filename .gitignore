@@ -1,4 +1,5 @@
 node_modules/
+dist/
 apps/web/dist/
 server/data/
 *.log
