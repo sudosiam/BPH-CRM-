@@ -37,12 +37,10 @@ type BookValue = {
   sheet: "delete" | "signout" | null;
   detailId: string | null;
   segment: Lead["status"];
-  scope: "mine" | "all";
   query: string;
   setPhase: (phase: Phase) => void;
   setQuery: (query: string) => void;
   setSegment: (segment: Lead["status"]) => void;
-  setScope: (scope: "mine" | "all") => void;
   clearError: () => void;
   goTab: (screen: "today" | "leads") => void;
   openSettings: () => void;
@@ -94,7 +92,6 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<Screen[]>(["today"]);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [segment, setSegment] = useState<Lead["status"]>("lead");
-  const [scope, setScope] = useState<"mine" | "all">("mine");
   const [query, setQuery] = useState("");
   const [sheet, setSheet] = useState<"delete" | "signout" | null>(null);
   const [toast, setToast] = useState("");
@@ -263,7 +260,6 @@ export function BookProvider({ children }: { children: ReactNode }) {
     sheet,
     detailId,
     segment,
-    scope,
     query,
     navDepth: Math.max(0, stack.length - 1) + (sheet ? 1 : 0),
     setPhase: (next) => {
@@ -272,7 +268,6 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     setQuery,
     setSegment,
-    setScope,
     clearError: () => setError(""),
     goTab(next) {
       setStack([next]);

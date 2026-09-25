@@ -48,10 +48,8 @@ export function digestLine(dueToday, overdue) {
   return parts.join(" · ");
 }
 
-export function digestCounts(leads, ownerId, today) {
-  const rows = leads.filter(
-    (lead) => !lead.deletedAt && lead.status === "lead" && lead.followUpOn && lead.ownerId === ownerId,
-  );
+export function digestCounts(leads, today) {
+  const rows = leads.filter((lead) => !lead.deletedAt && lead.status === "lead" && lead.followUpOn);
   return {
     overdue: rows.filter((lead) => dayDiff(lead.followUpOn, today) < 0).length,
     today: rows.filter((lead) => dayDiff(lead.followUpOn, today) === 0).length,

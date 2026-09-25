@@ -58,8 +58,8 @@ function Shell() {
   const bare = ["loading", "auth", "signup", "start", "join", "copy", "copy-error"].includes(book.phase);
   const tabbed = book.phase === "app" && (book.screen === "today" || book.screen === "leads");
   const showFab = book.screen === "today" || book.screen === "leads";
-  const mine = book.me ? digestCounts(book.leads, book.me.id, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
-  const badge = mine.today + mine.overdue;
+  const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
+  const badge = dueCounts.today + dueCounts.overdue;
   const syncLabel = book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced";
   const lead = book.leads.find((item) => item.id === book.detailId);
   const [shift, setShift] = useState(0);
@@ -185,7 +185,7 @@ function Shell() {
       {tabbed ? (
         <nav id="tabbar">
           <button className={`tab ${book.screen === "today" ? "on" : ""}`} type="button" onClick={() => book.goTab("today")}>
-            {badge ? <span className={`badge ${mine.overdue ? "overdue" : "today-due"}`}>{badge}</span> : null}
+            {badge ? <span className={`badge ${dueCounts.overdue ? "overdue" : "today-due"}`}>{badge}</span> : null}
             <IconToday />
             Today
           </button>

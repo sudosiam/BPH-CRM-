@@ -7,8 +7,7 @@ declare module "@shared/book.mjs" {
   export function localMinutes(timeZone: string, now?: Date): number;
   export function digestLine(dueToday: number, overdue: number): string;
   export function digestCounts(
-    leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null; ownerId: string }>,
-    ownerId: string,
+    leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null }>,
     today: string,
   ): { overdue: number; today: number };
   export function shouldSendDigest(input: {

@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { startServer } from "./index.mjs";
-import { shouldSendDigest, digestLine, nextCustomerName } from "../shared/book.mjs";
+import { shouldSendDigest, digestCounts, digestLine, nextCustomerName } from "../shared/book.mjs";
 
 async function boot() {
   const dataFile = path.join(mkdtempSync(path.join(tmpdir(), "bph-")), "book.json");
@@ -146,6 +146,17 @@ test("digest stays quiet until the chosen time and when nothing is due", () => {
       dueCount: 0,
     }),
     false,
+  );
+  assert.deepEqual(
+    digestCounts(
+      [
+        { status: "lead", followUpOn: "2026-09-25", ownerId: "a", deletedAt: null },
+        { status: "lead", followUpOn: "2026-09-24", ownerId: "b", deletedAt: null },
+        { status: "sold", followUpOn: null, ownerId: "c", deletedAt: null },
+      ],
+      "2026-09-25",
+    ),
+    { today: 1, overdue: 1 },
   );
   assert.equal(digestLine(1, 1), "1 due today · 1 overdue");
   assert.equal(digestLine(0, 0), "");

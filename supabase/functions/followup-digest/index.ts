@@ -59,7 +59,6 @@ Deno.serve(async () => {
       .from("leads")
       .select("follow_up_on, status, deleted_at, owner_id")
       .eq("org_id", profile.org_id)
-      .eq("owner_id", profile.id)
       .eq("status", "lead")
       .is("deleted_at", null);
 

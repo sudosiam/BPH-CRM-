@@ -210,15 +210,13 @@ export function CopyScreen() {
 export function TodayScreen() {
   const book = useBook();
   const today = todayISO(book.me?.timezone);
-  const scoped = book.leads.filter(
-    (lead) => lead.status === "lead" && (book.scope === "all" || lead.ownerId === book.me?.id),
-  );
-  const overdue = scoped.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) < 0).sort(compareFollow);
-  const due = scoped.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) === 0).sort(compareFollow);
-  const later = scoped
+  const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn));
+  const overdue = open.filter((lead) => dayDiff(lead.followUpOn, today) < 0).sort(compareFollow);
+  const due = open.filter((lead) => dayDiff(lead.followUpOn, today) === 0).sort(compareFollow);
+  const later = open
     .filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 0 && dayDiff(lead.followUpOn, today) <= 7)
     .sort(compareFollow);
-  const beyond = scoped.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 7).length;
+  const beyond = open.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 7).length;
   const showReminder = book.me && !book.me.notifyEnabled && overdue.length + due.length + later.length > 0;
   return (
     <>
@@ -231,19 +229,11 @@ export function TodayScreen() {
           {overdue.length ? <span className="overdue">{overdue.length} overdue</span> : null}
         </p>
       ) : null}
-      <div className="scope">
-        <button type="button" className={book.scope === "mine" ? "on" : ""} onClick={() => book.setScope("mine")}>
-          Mine
-        </button>
-        <button type="button" className={book.scope === "all" ? "on" : ""} onClick={() => book.setScope("all")}>
-          All
-        </button>
-      </div>
       {showReminder ? (
         <div className="reminder-card">
           <div>
             <strong>Reminders are off</strong>
-            <p className="meta">Get a morning alert for overdue leads and anything due today.</p>
+            <p className="meta">Get an alert for every follow-up that is overdue or due today.</p>
           </div>
           <button type="button" onClick={() => void book.setReminders(true)}>
             Turn on
@@ -256,7 +246,7 @@ export function TodayScreen() {
       {!overdue.length && !due.length ? (
         <div className="empty">
           <h2>Nothing overdue or due today</h2>
-          <p className="meta">Follow-ups you own show up here.</p>
+          <p className="meta">Every follow-up on the team shows up here, no matter who added it.</p>
         </div>
       ) : null}
       {beyond ? (
@@ -292,7 +282,7 @@ function LeadSection({ title, className, rows, today }: { title: string; classNa
                 <span className="row-copy">
                   <span className="row-name">{lead.name}</span>
                   <span className={`row-sub ${due.className}`}>{due.text}</span>
-                  {lead.ownerId !== book.me?.id ? <span className="row-owner">{ownerName(book.profiles, lead.ownerId, book.me)}</span> : null}
+                  <span className="row-owner">{ownerName(book.profiles, lead.ownerId, book.me)}</span>
                 </span>
               </button>
               {call ? (
@@ -582,7 +572,7 @@ export function AccountScreen() {
   const book = useBook();
   if (!book.me || !book.org) return null;
   const today = todayISO(book.me.timezone);
-  const counts = digestCounts(book.leads, book.me.id, today);
+  const counts = digestCounts(book.leads, today);
   const line = digestLine(counts.today, counts.overdue);
   const time = clock(book.me.notifyMinute);
   const code = book.org.inviteCode;
@@ -663,7 +653,7 @@ export function AccountScreen() {
         <p className="part-label">Reminders</p>
         <div className="card-block">
           <h2>Daily alert</h2>
-          <p className="meta">One alert for your overdue follow-ups and anything due that day.</p>
+          <p className="meta">One alert for the team's overdue follow-ups and anything due that day.</p>
           <label className="switch-row">
             <span>Alerts</span>
             <input type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
