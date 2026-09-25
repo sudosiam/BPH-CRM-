@@ -1,0 +1,13 @@
+{
+  "name": "bph-crm",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "server"
+  ],
+  "scripts": {
+    "start": "npm --prefix apps/web run build && node server/index.mjs",
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test server/test.mjs"
+  }
+}

@@ -1,9 +1,24 @@
 # BPH CRM
 
-A mobile CRM for a shared book of leads. Each lead is **Lead**, **Sold**, or **Lost**, with a follow-up date and a morning reminder when something is due.
+A mobile CRM for one shared book of leads. Each lead is **Lead**, **Sold**, or **Lost**. Follow-up is a date. The owner of a lead gets a morning alert when something is overdue or due today.
 
-- [Plan and design](docs/DESIGN.md)
-- [Planned Supabase schema](docs/schema.sql)
-- [Clickable design prototype](prototype/index.html)
+Open the app, create an account, and start a business. Teammates join with the invite code on the You tab. The first sign-in copies the whole book onto the phone. After that, Today opens from that copy and syncs in the background.
 
-The prototype is the visual spec. It runs in the browser with sample data: first copy onto the phone, Today, Leads, Sold and Lost, and reminders. Open `prototype/index.html`, or serve the `prototype` folder. Add `?replay=1` to see the first-copy screen again.
+## Run it
+
+```bash
+npm install
+npm start
+```
+
+`npm start` builds the app and serves it with the shared book on port 8787. Accounts, invites, lead sync, and morning web-push digests all live in that process. Data is stored in `server/data/book.json`.
+
+`npm test` checks accounts, invites, sync, conflicts, and the digest rules. `npm run dev` runs the API and the Vite app together.
+
+## Supabase
+
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then rebuild. The app uses Supabase Auth, the SQL in `supabase/migrations`, and Realtime instead of the included server. Schedule `supabase/functions/followup-digest` hourly with the service role and the same VAPID keys the app uses.
+
+## Design
+
+The visual spec and product rules are in [docs/DESIGN.md](docs/DESIGN.md). The clickable prototype in `prototype/` is the earlier design pass.
