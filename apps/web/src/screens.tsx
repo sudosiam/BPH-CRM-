@@ -534,16 +534,16 @@ export function CustomersScreen() {
         onChange={(event) => setQuery(event.target.value)}
       />
       <div className="filter-card">
-        <p className="filter-label">Status</p>
-        <div className="chips">
+        <div className="filter-line">
+          <p className="filter-label">Status</p>
           {(["all", "lead", "sold", "lost"] as const).map((item) => (
             <button key={item} type="button" className={`chip ${status === item ? "on" : ""}`} onClick={() => setStatus(item)}>
               {item === "all" ? "All" : labelStatus(item)}
             </button>
           ))}
         </div>
-        <p className="filter-label">Tags</p>
-        <div className="chips">
+        <div className="filter-line">
+          <p className="filter-label">Tags</p>
           {CUSTOMER_TAGS.map((tag) => (
             <button
               key={tag}
