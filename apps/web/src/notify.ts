@@ -13,11 +13,24 @@ function urlBase64ToUint8Array(value: string) {
   return Uint8Array.from(raw, (char) => char.charCodeAt(0));
 }
 
+async function pushRegistration() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
+  const registration = await navigator.serviceWorker.getRegistration();
+  if (!registration) return null;
+  if (registration.active) return registration;
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<ServiceWorkerRegistration | null>((resolve) => {
+      setTimeout(() => resolve(registration.active ? registration : null), 4000);
+    }),
+  ]);
+}
+
 export async function subscribeToPush() {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+  const registration = await pushRegistration();
+  if (!registration) return false;
   const publicKey = await remote.vapidPublicKey();
   if (!publicKey) return false;
-  const registration = await navigator.serviceWorker.ready;
   const existing = await registration.pushManager.getSubscription();
   const subscription =
     existing ??
@@ -44,11 +57,27 @@ export async function enableNotifications() {
 const TEST_TITLE = "BPH";
 const TEST_BODY = "Test alert. Reminders can reach this phone.";
 
+function withTimeout<T>(work: Promise<T>, ms: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function showLocalTest() {
   const options = { body: TEST_BODY, icon: "/icon-192.png", data: { url: "/" } };
-  if ("serviceWorker" in navigator) {
+  const registration = await pushRegistration();
+  if (registration) {
     try {
-      const registration = await navigator.serviceWorker.ready;
       await registration.showNotification(TEST_TITLE, options);
       return;
     } catch {
@@ -63,9 +92,9 @@ export async function showTestNotification() {
   const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
   if (permission !== "granted") return "denied" as const;
   try {
-    const pushed = await subscribeToPush();
+    const pushed = await withTimeout(subscribeToPush(), 8000);
     if (pushed) {
-      const sent = await remote.sendTestPush();
+      const sent = await withTimeout(remote.sendTestPush(), 8000);
       if (sent > 0) return "push" as const;
     }
   } catch {
