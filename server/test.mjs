@@ -177,7 +177,7 @@ test("digest stays quiet until the chosen time and when nothing is due", () => {
   assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: true, fullSyncComplete: true, leadCount: 0 }), true);
   assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: false, fullSyncComplete: false, leadCount: 3 }), true);
   assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: false, fullSyncComplete: false, leadCount: 0 }), true);
-  assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: true, fullSyncComplete: false, leadCount: 0 }), false);
+  assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: true, fullSyncComplete: false, leadCount: 0 }), true);
   assert.equal(hasLocalBook({ userId: "u", hasProfile: false, hasOrg: false, fullSyncComplete: false, leadCount: 2 }), false);
   assert.equal(membershipMatches({ userId: "u", email: "a@b.c", orgId: "o", orgName: "Hub" }, "u", ""), true);
   assert.equal(membershipMatches({ userId: "u", email: "a@b.c", orgId: "o", orgName: "Hub" }, "other", "A@B.c"), true);

@@ -66,10 +66,15 @@ function toRow(lead: Lead, userId: string) {
   };
 }
 
+function isNetworkError(error: { message?: string } | null) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("fetch") || message.includes("network") || message.includes("offline") || message.includes("load failed");
+}
+
 async function membershipFromBook(supabase: SupabaseClient, userId: string): Promise<{ profile: Profile; org: Org } | null> {
   const { data, error } = await supabase.rpc("my_book");
-  if (error || !data || typeof data !== "object") return null;
-  const row = data as Record<string, unknown>;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (error || !row || typeof row !== "object") return null;
   if (!row.org_id) return null;
   const role = row.role === "owner" ? "owner" : "member";
   return {
@@ -97,14 +102,14 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
   const session = data.session;
   if (!session) return null;
   const profileResult = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
-  if (profileResult.error) throw new Error(profileResult.error.message);
-  const profileRow = profileResult.data;
+  if (profileResult.error && isNetworkError(profileResult.error)) throw new Error(profileResult.error.message);
+  const profileRow = profileResult.error ? null : profileResult.data;
   let profile = profileRow && !profileRow.removed_at ? mapProfile(profileRow) : null;
   let org: Org | null = null;
   if (profile) {
     const orgResult = await supabase.from("orgs").select("*").eq("id", profile.orgId).maybeSingle();
-    if (orgResult.error) throw new Error(orgResult.error.message);
-    org = orgResult.data ? mapOrg(orgResult.data, profile.role) : null;
+    if (orgResult.error && isNetworkError(orgResult.error)) throw new Error(orgResult.error.message);
+    org = !orgResult.error && orgResult.data ? mapOrg(orgResult.data, profile.role) : null;
   }
   if (!profile || !org) {
     const found = await membershipFromBook(supabase, session.user.id);

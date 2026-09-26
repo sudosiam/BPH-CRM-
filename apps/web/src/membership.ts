@@ -8,6 +8,7 @@ export type Membership = {
   orgId: string;
   orgName: string;
   inviteCode: string | null;
+  displayName?: string;
 };
 
 export function readMembership(): Membership | null {
@@ -33,4 +34,25 @@ export function writeMembership(record: Membership) {
 export function matchingMembership(userId: string, email: string) {
   const record = readMembership();
   return record && membershipMatches(record, userId, email) ? record : null;
+}
+
+export function saveMembership(input: {
+  userId: string;
+  email: string;
+  orgId: string;
+  orgName: string;
+  inviteCode?: string | null;
+  displayName?: string;
+}) {
+  const existing = readMembership();
+  const sameOrg = existing?.orgId === input.orgId;
+  const sameUser = existing?.userId === input.userId;
+  writeMembership({
+    userId: input.userId,
+    email: input.email,
+    orgId: input.orgId,
+    orgName: input.orgName,
+    inviteCode: input.inviteCode || (sameOrg ? existing?.inviteCode ?? null : null),
+    displayName: input.displayName || (sameUser ? existing?.displayName : undefined),
+  });
 }

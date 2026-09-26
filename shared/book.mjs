@@ -116,8 +116,7 @@ export function nextCustomerName(names) {
 
 export function hasLocalBook(input) {
   if (!input.userId || !input.hasProfile) return false;
-  if (input.fullSyncComplete || input.leadCount > 0) return true;
-  return !input.hasOrg;
+  return Boolean(input.fullSyncComplete || input.leadCount > 0 || input.hasOrg || input.hasProfile);
 }
 
 export function membershipMatches(record, userId, email) {

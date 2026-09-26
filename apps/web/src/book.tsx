@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, hasLocalBook, nextCustomerName, todayISO } from "@shared/book.mjs";
 import { db, resetLocal } from "./db";
-import { matchingMembership, readMembership, writeMembership } from "./membership";
+import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
@@ -131,13 +131,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
       cursor: flags?.cursor,
     });
     if (nextOrg) {
-      const existing = readMembership();
-      writeMembership({
+      saveMembership({
         userId: accountUserId,
         email: accountEmail,
         orgId: nextOrg.id,
         orgName: nextOrg.name,
-        inviteCode: nextOrg.inviteCode || (existing?.orgId === nextOrg.id ? existing.inviteCode : null),
+        inviteCode: nextOrg.inviteCode,
       });
     }
     setUserId(accountUserId);
@@ -157,6 +156,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
     return enqueueSync(async () => {
       setSyncing(true);
       try {
+        if (!navigator.onLine) {
+          setHeld(true);
+          return;
+        }
         await flushOutbox(showToast);
         await runIncremental();
         setHeld(false);
@@ -222,13 +225,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
         cursor: saved.cursor,
       });
     }
-    const existing = readMembership();
-    writeMembership({
+    saveMembership({
       userId: saved.userId,
       email: saved.email,
       orgId: org.id,
       orgName: org.name,
-      inviteCode: org.inviteCode || (existing?.orgId === org.id ? existing.inviteCode : null),
+      inviteCode: org.inviteCode,
+      displayName: me.displayName,
     });
     return true;
   }
@@ -266,8 +269,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setPhase("auth");
         return;
       }
-      if ((!account.profile || !account.org) && opened && saved?.userId === account.user.id) {
-        setHeld(true);
+      if (opened && saved) {
+        if (saved.userId === account.user.id && account.profile && account.org) {
+          await tokenFor(account.user.id, account.user.email, account.org);
+          void syncNow();
+        }
         return;
       }
       await openAccount(account, false);
@@ -286,6 +292,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       void syncNow();
     });
     const onOnline = () => {
+      if (!navigator.onLine) return;
       setOnline(true);
       void syncNow();
     };
@@ -412,12 +419,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
         await db.profiles.put(joined.profile);
         await tokenFor(joined.profile.id, email, joined.org, { fullSyncComplete: false, cursor: null });
         if (!joined.org.inviteCode) {
-          writeMembership({
+          saveMembership({
             userId: joined.profile.id,
             email,
             orgId: joined.org.id,
             orgName: joined.org.name,
             inviteCode: code.trim(),
+            displayName: displayName.trim(),
           });
         }
         setPhase("copy");
@@ -438,8 +446,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
     })(),
     async reopenBook() {
       setError("");
-      const saved = matchingMembership(userId, email);
-      try {
+        const saved = matchingMembership(userId, email);
+        try {
         const account = await remote.session();
         if (account?.profile && account.org) {
           await openAccount(account, false);
@@ -449,7 +457,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           setError("This account is already in that book. Open it again when you are online.");
           return;
         }
-        const joined = await remote.joinOrg(saved.inviteCode, me?.displayName || "Teammate", zone());
+        const joined = await remote.joinOrg(saved.inviteCode, saved.displayName || me?.displayName || "Teammate", zone());
         await db.profiles.put(joined.profile);
         await tokenFor(joined.profile.id, email || saved.email, joined.org, { fullSyncComplete: false, cursor: null });
         setPhase("copy");
