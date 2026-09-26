@@ -39,12 +39,14 @@ declare module "@shared/book.mjs" {
       phone?: string;
       notes?: string;
       status: string;
+      tags?: unknown;
       followUpOn?: string | null;
       closedOn?: string | null;
       addedBy?: string;
       updatedAt?: string;
     }>,
   ): string;
+  export function mergeLead<T extends Record<string, unknown>>(server: T, local: T): T;
   export function safeTimeZone(timeZone?: string): string;
   export function hasLocalBook(input: {
     userId: string;

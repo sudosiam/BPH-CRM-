@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, followUpResult, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
+import { customerMatches, followUpResult, mergeLead, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(followUpResult("no-answer", "2026-09-26", "2026-09-20").followUpOn, "2026-09-27");
@@ -34,4 +34,32 @@ test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(customerMatches(people[0], { status: "sold" }), false);
   assert.equal(customerMatches(people[1], { status: "sold", tags: ["Parts"], query: "mina" }), true);
   assert.equal(customerMatches(people[1], { tags: ["Lithium battery"] }), false);
+  const merged = mergeLead(
+    { name: "Server", source: "Phone", history: "old", contactCount: 1, lastContactAt: "a", tags: [], version: 4, status: "lead" },
+    {
+      name: "Local",
+      phone: "9",
+      notes: "n",
+      status: "sold",
+      followUpOn: null,
+      closedOn: "2026-09-26",
+      soldAmount: 10,
+      lostReason: null,
+      source: "Walk-in",
+      tags: ["Scooty", "Nope"],
+      lastContactAt: "b",
+      contactCount: 3,
+      history: "2026-09-26 · Called",
+      deletedAt: null,
+      updatedBy: "me",
+      version: 1,
+    },
+  );
+  assert.equal(merged.name, "Local");
+  assert.equal(merged.source, "Walk-in");
+  assert.equal(merged.history, "2026-09-26 · Called");
+  assert.equal(merged.contactCount, 3);
+  assert.equal(merged.lastContactAt, "b");
+  assert.deepEqual(merged.tags, ["Scooty"]);
+  assert.equal(merged.version, 4);
 });

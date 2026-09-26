@@ -75,4 +75,9 @@ export type Meta = {
   fullSyncComplete: boolean;
   cursor: string | null;
   org: Org | null;
+  profilePending?: {
+    timezone?: string;
+    notifyEnabled?: boolean;
+    notifyMinute?: number;
+  } | null;
 };

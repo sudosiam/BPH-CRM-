@@ -99,6 +99,21 @@ function isNetworkError(error: { message?: string } | null) {
   return message.includes("fetch") || message.includes("network") || message.includes("offline") || message.includes("load failed");
 }
 
+async function everyRow(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: Record<string, unknown>[] | null; error: { message?: string } | null }>,
+) {
+  const pageSize = 1000;
+  const rows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw new Error(error.message || "Could not copy the book.");
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < pageSize) return rows;
+    if (from >= 200_000) throw new Error("The book is too large to copy in one pass.");
+  }
+}
+
 async function membershipFromBook(supabase: SupabaseClient, userId: string): Promise<{ profile: Profile; org: Org } | null> {
   const { data, error } = await supabase.rpc("my_book");
   const row = Array.isArray(data) ? data[0] : data;
@@ -271,15 +286,15 @@ export function createSupabaseRemote() {
     },
     async pull(cursor: string | null): Promise<Pull> {
       const since = pullSince(cursor);
-      let leadQuery = supabase.from("leads").select("*").order("updated_at");
-      if (since) leadQuery = leadQuery.gt("updated_at", since);
-      const [{ data: leadRows, error: leadError }, { data: profileRows, error: profileError }, account] = await Promise.all([
-        leadQuery,
-        supabase.from("profiles").select("*"),
+      const [leadRows, profileRows, account] = await Promise.all([
+        everyRow((from, to) => {
+          let query = supabase.from("leads").select("*").order("updated_at", { ascending: true }).order("id", { ascending: true });
+          if (since) query = query.gt("updated_at", since);
+          return query.range(from, to);
+        }),
+        everyRow((from, to) => supabase.from("profiles").select("*").order("id", { ascending: true }).range(from, to)),
         loadAccount(supabase),
       ]);
-      if (leadError) throw new Error(leadError.message);
-      if (profileError) throw new Error(profileError.message);
       if (!account?.org) throw new Error("Join a business first.");
       const { data: serverTime, error: timeError } = await supabase.rpc("server_now");
       if (timeError) throw new Error(timeError.message);
@@ -304,7 +319,10 @@ export function createSupabaseRemote() {
         const duplicate = error?.code === "23505" || /duplicate key/i.test(error?.message || "");
         if (duplicate) {
           const current = await supabase.from("leads").select("*").eq("id", lead.id).maybeSingle();
-          if (current.data) return { ok: true, lead: mapLead(current.data) };
+          if (current.error) throw new Error(current.error.message);
+          if (current.data) {
+            return { ok: false, lead: mapLead(current.data), deleted: Boolean(current.data.deleted_at) };
+          }
         }
         throw new Error(error?.message || "Could not sync.");
       }

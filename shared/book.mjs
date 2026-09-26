@@ -201,6 +201,27 @@ export function normalizeTags(value) {
   return CUSTOMER_TAGS.filter((tag) => picked.has(tag));
 }
 
+export function mergeLead(server, local) {
+  return {
+    ...server,
+    name: local.name,
+    phone: local.phone,
+    notes: local.notes,
+    status: local.status,
+    followUpOn: local.followUpOn,
+    closedOn: local.closedOn,
+    soldAmount: local.soldAmount,
+    lostReason: local.lostReason,
+    source: local.source ?? null,
+    tags: normalizeTags(local.tags),
+    lastContactAt: local.lastContactAt ?? null,
+    contactCount: Number(local.contactCount) || 0,
+    history: String(local.history ?? ""),
+    deletedAt: local.deletedAt,
+    updatedBy: local.updatedBy,
+  };
+}
+
 export function customerMatches(lead, filter = {}) {
   if (!lead || lead.deletedAt) return false;
   const status = filter.status || "all";

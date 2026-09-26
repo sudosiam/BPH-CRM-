@@ -637,7 +637,7 @@ export function createBook(dataFile) {
         }
         if (existing.orgId !== auth.org.id) return { status: 404, body: { error: "This lead is gone." } };
         if (body.baseVersion == null) {
-          return { status: 200, body: { lead: publicLead(existing) }, orgId: auth.org.id };
+          return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: Boolean(existing.deletedAt) } };
         }
         if (existing.deletedAt) return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
         if (existing.version !== body.baseVersion) {

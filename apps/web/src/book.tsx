@@ -6,7 +6,7 @@ import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, showTestNotification, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
-import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
+import { enqueueSync, flushOutbox, flushProfile, queueLead, queueProfile, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
@@ -14,6 +14,12 @@ type Screen = "today" | "leads" | "customers" | "account" | "member" | "message"
 
 function rootOf(stack: Screen[]): "today" | "leads" | "customers" {
   return stack.find((screen) => screen === "today" || screen === "leads" || screen === "customers") ?? "today";
+}
+
+function actionError(reason: unknown, fallback: string) {
+  const message = reason instanceof Error ? reason.message : "";
+  if (!navigator.onLine || /fetch|network|offline|load failed/i.test(message)) return "Connect, then try again.";
+  return message || fallback;
 }
 type SyncWord = "synced" | "syncing" | "saved";
 
@@ -150,6 +156,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const undoToken = useRef(0);
   const testAlertBusy = useRef(false);
   const waSave = useRef(0);
+  const waDirty = useRef(false);
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -248,6 +255,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
           setHeld(true);
           return;
         }
+        const meta = await db.meta.get("local");
+        if (meta && !meta.fullSyncComplete) await runFullSync();
         await flushOutbox(showToast, (local, server) => {
           setConflictDraft({
             id: server.id,
@@ -267,6 +276,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           setEditorDirty(true);
         });
         await runIncremental();
+        await flushProfile();
         setHeld(false);
         setSyncedAt(new Date().toISOString());
       } catch {
@@ -359,13 +369,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
     });
     if (!ready || !saved || !me) return false;
     const org = saved.org ?? { id: me.orgId, name: "Your book", inviteCode: null };
-    if (!saved.org || !saved.fullSyncComplete) {
+    if (!saved.org) {
       await saveMeta({
         token: saved.token,
         userId: saved.userId,
         email: saved.email,
         org,
-        fullSyncComplete: true,
+        fullSyncComplete: Boolean(saved.fullSyncComplete),
         cursor: saved.cursor,
       });
     }
@@ -492,19 +502,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }, [profiles, phase, userId]);
 
   useEffect(() => {
-    if (phase !== "app" || !me || !navigator.onLine) return;
-    const here = zone();
-    if (!here || here === me.timezone) return;
-    void remote.updateProfile({ ...me, timezone: here }).then((profile) => db.profiles.put(profile)).catch(() => {});
-  }, [phase, me?.id, me?.timezone]);
-
-  useEffect(() => {
     syncBadge(leads, me);
     if (phase === "app") void maybeLocalDigest(leads, me, pushActive);
   }, [leads, me, phase, pushActive]);
 
   useEffect(() => {
-    if (!org?.id) return;
+    if (!org?.id || waDirty.current) return;
     if (org.waTemplate) {
       setWaTemplateState(org.waTemplate);
       return;
@@ -843,15 +846,15 @@ export function BookProvider({ children }: { children: ReactNode }) {
         if (result !== "push") showToast("Closed-app alerts are not set up. Alerts still show while the app is open.");
         setPushActive(result === "push");
       }
-      const profile = await remote.updateProfile({ ...me, notifyEnabled: enabled });
-      await db.profiles.put(profile);
+      await queueProfile(me.id, { notifyEnabled: enabled });
       showToast(enabled ? "Reminders on" : "Reminders off");
+      void syncNow();
     },
     async setReminderTime(minute) {
       if (!me) return;
       const next = Math.max(0, Math.min(1439, Math.round(minute)));
-      const profile = await remote.updateProfile({ ...me, notifyMinute: next });
-      await db.profiles.put(profile);
+      await queueProfile(me.id, { notifyMinute: next });
+      void syncNow();
     },
     async sendTestAlert() {
       if (testAlertBusy.current) return;
@@ -871,6 +874,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     waTemplate,
     setWaTemplate(value) {
       const next = value.slice(0, 500);
+      waDirty.current = true;
       setWaTemplateState(next);
       try {
         localStorage.setItem(org?.id ? `${WA_KEY}:${org.id}` : WA_KEY, next);
@@ -883,6 +887,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
         void remote.setWaTemplate(next).then(async (saved) => {
           const current = await db.meta.get("local");
           if (current?.org) await db.meta.put({ ...current, org: { ...current.org, waTemplate: saved } });
+          setWaTemplateState((typing) => {
+            if (typing === saved) waDirty.current = false;
+            return typing;
+          });
         }).catch(() => {});
       }, 400);
     },
@@ -890,11 +898,15 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setSheet("code");
     },
     async confirmRegenerate() {
-      const inviteCode = await remote.regenerateCode();
-      const current = await db.meta.get("local");
-      if (current?.org) await db.meta.put({ ...current, org: { ...current.org, inviteCode } });
-      setSheet(null);
-      showToast("New code ready");
+      try {
+        const inviteCode = await remote.regenerateCode();
+        const current = await db.meta.get("local");
+        if (current?.org) await db.meta.put({ ...current, org: { ...current.org, inviteCode } });
+        setSheet(null);
+        showToast("New code ready");
+      } catch (reason) {
+        showToast(actionError(reason, "Could not change the code."));
+      }
     },
     removeMember(id) {
       setPendingMemberId(id);
@@ -902,13 +914,17 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     async confirmRemove() {
       if (!pendingMemberId) return;
-      await remote.removeMember(pendingMemberId);
-      const profile = await db.profiles.get(pendingMemberId);
-      if (profile) await db.profiles.put({ ...profile, removedAt: new Date().toISOString() });
-      setSheet(null);
-      setPendingMemberId(null);
-      showToast("Removed from the team");
-      void syncNow();
+      try {
+        await remote.removeMember(pendingMemberId);
+        const profile = await db.profiles.get(pendingMemberId);
+        if (profile) await db.profiles.put({ ...profile, removedAt: new Date().toISOString() });
+        setSheet(null);
+        setPendingMemberId(null);
+        showToast("Removed from the team");
+        void syncNow();
+      } catch (reason) {
+        showToast(actionError(reason, "Could not remove them."));
+      }
     },
     transferOwner(id) {
       setPendingMemberId(id);
@@ -916,15 +932,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     async confirmTransfer() {
       if (!pendingMemberId || !me) return;
-      await remote.transferOwner(pendingMemberId);
-      const nextOwner = await db.profiles.get(pendingMemberId);
-      const self = await db.profiles.get(me.id);
-      if (self) await db.profiles.put({ ...self, role: "member" });
-      if (nextOwner) await db.profiles.put({ ...nextOwner, role: "owner" });
-      setSheet(null);
-      setPendingMemberId(null);
-      showToast("They are the owner now");
-      void syncNow();
+      try {
+        await remote.transferOwner(pendingMemberId);
+        const nextOwner = await db.profiles.get(pendingMemberId);
+        const self = await db.profiles.get(me.id);
+        if (self) await db.profiles.put({ ...self, role: "member" });
+        if (nextOwner) await db.profiles.put({ ...nextOwner, role: "owner" });
+        setSheet(null);
+        setPendingMemberId(null);
+        showToast("They are the owner now");
+        void syncNow();
+      } catch (reason) {
+        showToast(actionError(reason, "Could not transfer the business."));
+      }
     },
     async confirmDuplicate() {
       const draft = pendingDraft;
@@ -934,9 +954,9 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     async usePhoneZone() {
       if (!me) return;
-      const profile = await remote.updateProfile({ ...me, timezone: zone() });
-      await db.profiles.put(profile);
+      await queueProfile(me.id, { timezone: zone() });
       showToast("Time zone saved");
+      void syncNow();
     },
     exportCsv() {
       const names = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
@@ -946,6 +966,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           phone: lead.phone,
           notes: lead.notes,
           status: lead.status,
+          tags: lead.tags,
           followUpOn: lead.followUpOn,
           closedOn: lead.closedOn,
           addedBy: names.get(lead.createdBy || lead.ownerId) || "",
@@ -1014,6 +1035,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       void syncNow();
     },
     async setSoldAmount(amount) {
+      if (amount != null && !Number.isFinite(amount)) return;
       await changeLead({ soldAmount: amount });
     },
     async setLostReason(reason) {

@@ -1,7 +1,13 @@
-import { normalizeTags } from "@shared/book.mjs";
+import { mergeLead, pullSince } from "@shared/book.mjs";
 import { db } from "./db";
 import { remote } from "./remote";
-import type { Lead, Org } from "./types";
+import type { Lead, Org, Profile } from "./types";
+
+export type ProfilePatch = {
+  timezone?: string;
+  notifyEnabled?: boolean;
+  notifyMinute?: number;
+};
 
 export async function applyPull(payload: Awaited<ReturnType<typeof remote.pull>>, replaceAll: boolean) {
   const pending = new Set((await db.outbox.toArray()).map((item) => item.id));
@@ -21,6 +27,10 @@ export async function applyPull(payload: Awaited<ReturnType<typeof remote.pull>>
     await db.profiles.clear();
     await db.profiles.bulkPut(payload.profiles);
     const current = await db.meta.get("local");
+    if (current?.profilePending && current.userId) {
+      const self = await db.profiles.get(current.userId);
+      if (self) await db.profiles.put({ ...self, ...current.profilePending });
+    }
     if (current) await db.meta.put({ ...current, org: payload.org, cursor: payload.serverTime });
   });
 }
@@ -42,7 +52,46 @@ export async function runIncremental() {
   const current = await db.meta.get("local");
   if (!current?.fullSyncComplete) return;
   const payload = await remote.pull(current.cursor);
-  await applyPull(payload, false);
+  await applyPull(payload, pullSince(current.cursor) == null);
+}
+
+export async function queueProfile(userId: string, patch: ProfilePatch) {
+  const profile = await db.profiles.get(userId);
+  if (profile) await db.profiles.put({ ...profile, ...patch });
+  const current = await db.meta.get("local");
+  if (!current) return;
+  await db.meta.put({
+    ...current,
+    profilePending: { ...(current.profilePending ?? {}), ...patch },
+  });
+}
+
+function samePatch(left: ProfilePatch | null | undefined, right: ProfilePatch | null | undefined) {
+  if (!left || !right) return false;
+  return left.timezone === right.timezone && left.notifyEnabled === right.notifyEnabled && left.notifyMinute === right.notifyMinute;
+}
+
+export async function flushProfile() {
+  const current = await db.meta.get("local");
+  const pending = current?.profilePending;
+  if (!current || !pending || !Object.keys(pending).length) return;
+  const profile = await db.profiles.get(current.userId);
+  if (!profile) return;
+  let saved: Profile;
+  try {
+    saved = await remote.updateProfile({ ...profile, ...pending });
+  } catch {
+    return;
+  }
+  const latest = await db.meta.get("local");
+  if (!latest) return;
+  if (samePatch(latest.profilePending, pending)) {
+    await db.profiles.put(saved);
+    await db.meta.put({ ...latest, profilePending: null });
+    return;
+  }
+  const row = await db.profiles.get(current.userId);
+  if (row && latest.profilePending) await db.profiles.put({ ...saved, ...latest.profilePending });
 }
 
 export async function queueLead(next: Lead, baseVersion: number | null) {
@@ -108,20 +157,7 @@ export async function flushOutbox(
         if (result.ok) continue;
         const ownUndo = Boolean(result.lead?.deletedAt && !lead.deletedAt && result.lead.updatedBy === lead.updatedBy);
         if (result.lead && (!result.deleted || ownUndo)) {
-          const merged = {
-            ...result.lead,
-            name: lead.name,
-            phone: lead.phone,
-            notes: lead.notes,
-            status: lead.status,
-            followUpOn: lead.followUpOn,
-            closedOn: lead.closedOn,
-            soldAmount: lead.soldAmount,
-            lostReason: lead.lostReason,
-            tags: normalizeTags(lead.tags),
-            deletedAt: lead.deletedAt,
-            updatedBy: lead.updatedBy,
-          };
+          const merged = mergeLead(result.lead, lead);
           result = await remote.pushLead(merged, result.lead.version);
           if (await settlePush(item, result)) {
             progressed = true;
@@ -165,5 +201,6 @@ export async function saveMeta(patch: {
     org: patch.org,
     fullSyncComplete: patch.fullSyncComplete ?? current?.fullSyncComplete ?? false,
     cursor: patch.cursor === undefined ? current?.cursor ?? null : patch.cursor,
+    profilePending: current?.profilePending ?? null,
   });
 }

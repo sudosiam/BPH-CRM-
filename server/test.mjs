@@ -286,9 +286,19 @@ test("rejoin, idempotent insert, transfer, and a damaged book file", async () =>
         lead: { id: leadId, name: "Customer 1", phone: "1", notes: "edited", status: "lead", followUpOn: "2026-09-26", closedOn: null },
       },
     });
-    assert.equal(second.status, 200);
+    assert.equal(second.status, 409);
     assert.equal(second.data.lead.version, 1);
     assert.equal(second.data.lead.notes, "");
+    const applied = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: second.data.lead.version,
+        lead: { ...second.data.lead, notes: "edited" },
+      },
+    });
+    assert.equal(applied.status, 200);
+    assert.equal(applied.data.lead.notes, "edited");
 
     const other = await json(base, "/api/leads", {
       method: "POST",
