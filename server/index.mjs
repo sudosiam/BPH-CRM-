@@ -453,16 +453,18 @@ export function createBook(dataFile) {
 
     if (req.method === "POST" && url.pathname === "/api/orgs/join") {
       const current = state.profiles.find((item) => item.id === auth.user.id);
-      if (current && !current.removedAt) {
-        return send(res, 400, { error: "You already belong to a business." });
-      }
       if (limited(`join:${auth.user.id}`, 10)) return send(res, 429, { error: "Too many tries. Wait a few minutes." });
       const body = await readJson(req);
       const code = normalizeCode(body.code);
-      const displayName = String(body.displayName ?? auth.user.displayName).trim();
+      const typedName = String(body.displayName ?? "").trim();
       const org = state.orgs.find((item) => item.inviteCode === code);
       if (!org) return send(res, 400, { error: "That code does not match a business." });
+      if (current && !current.removedAt && current.orgId !== org.id) {
+        return send(res, 400, { error: "You are already in a business." });
+      }
+      const displayName = typedName || current?.displayName || String(auth.user.displayName ?? "").trim();
       if (displayName.length < 1 || displayName.length > 80) return send(res, 400, { error: "Add your name." });
+      const alreadyHere = Boolean(current && !current.removedAt && current.orgId === org.id);
       const profile = current ?? {
         id: auth.user.id,
         orgId: org.id,
@@ -475,16 +477,18 @@ export function createBook(dataFile) {
       };
       await mutate(async () => {
         auth.user.displayName = displayName;
-        profile.orgId = org.id;
         profile.displayName = displayName;
-        profile.role = "member";
         profile.timezone = safeTimeZone(body.timezone);
-        profile.removedAt = null;
+        if (!alreadyHere) {
+          profile.orgId = org.id;
+          profile.role = "member";
+          profile.removedAt = null;
+        }
         if (!current) state.profiles.push(profile);
         persist();
       });
       broadcast(org.id);
-      send(res, 200, { org: publicOrg(org, "member"), profile: publicProfile(profile) });
+      send(res, 200, { org: publicOrg(org, profile.role), profile: publicProfile(profile) });
       return;
     }
 

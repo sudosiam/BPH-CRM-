@@ -208,13 +208,15 @@ export function createSupabaseRemote() {
       return { org: account.org, profile: account.profile };
     },
     async joinOrg(code: string, displayName: string, timezone: string) {
-      const { error } = await supabase.rpc("join_org", { code, display_name: displayName });
+      const name = displayName.trim();
+      const { error } = await supabase.rpc("join_org", { code, display_name: name });
       if (error) throw new Error(error.message);
       const userId = (await supabase.auth.getUser()).data.user?.id;
-      const { error: profileError } = await supabase.from("profiles").update({ timezone, display_name: displayName }).eq("id", userId);
-      if (profileError) throw new Error(profileError.message);
+      const patch: Record<string, string> = { timezone };
+      if (name) patch.display_name = name;
+      await supabase.from("profiles").update(patch).eq("id", userId);
       const account = await loadAccount(supabase);
-      if (!account?.org || !account.profile) throw new Error("Could not join.");
+      if (!account?.org || !account.profile) throw new Error("Could not join. Check the code and try again.");
       return { org: account.org, profile: account.profile };
     },
     async setWaTemplate(template: string) {

@@ -230,6 +230,23 @@ test("rejoin, idempotent insert, transfer, and a damaged book file", async () =>
     });
     assert.equal(joined.status, 200);
 
+    const sameCode = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: mate.data.token,
+      body: { code: ` ${created.data.org.inviteCode.slice(0, 4)} ${created.data.org.inviteCode.slice(4)} `, displayName: "" },
+    });
+    assert.equal(sameCode.status, 200);
+    assert.equal(sameCode.data.profile.role, "member");
+    assert.equal(sameCode.data.profile.displayName, "Nadia");
+
+    const ownerAgain = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: owner.data.token,
+      body: { code: created.data.org.inviteCode, displayName: "Rafi" },
+    });
+    assert.equal(ownerAgain.status, 200);
+    assert.equal(ownerAgain.data.profile.role, "owner");
+
     const removed = await json(base, "/api/orgs/members/remove", {
       method: "POST",
       token: owner.data.token,
@@ -246,10 +263,11 @@ test("rejoin, idempotent insert, transfer, and a damaged book file", async () =>
     const rejoined = await json(base, "/api/orgs/join", {
       method: "POST",
       token: signed.data.token,
-      body: { code: created.data.org.inviteCode, displayName: "Nadia", timezone: "UTC" },
+      body: { code: created.data.org.inviteCode, displayName: "", timezone: "UTC" },
     });
     assert.equal(rejoined.status, 200);
     assert.equal(rejoined.data.profile.role, "member");
+    assert.equal(rejoined.data.profile.displayName, "Nadia");
 
     const leadId = crypto.randomUUID();
     const first = await json(base, "/api/leads", {

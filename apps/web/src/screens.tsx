@@ -853,7 +853,7 @@ export function AccountScreen() {
               New invite code
             </button>
           ) : (
-            <p className="meta">Ask the owner for a new code if this one stops working.</p>
+            <p className="meta">You are already in this book. A new code is only for someone new.</p>
           )}
         </div>
       </section>
