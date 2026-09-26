@@ -107,7 +107,7 @@ export async function showTestNotification() {
 export function syncBadge(leads: Lead[], me: Profile | null) {
   if (!me || !("setAppBadge" in navigator)) return;
   const today = todayISO(me.timezone);
-  const counts = digestCounts(leads, today, me.id);
+  const counts = digestCounts(leads, today);
   const total = counts.today + counts.overdue;
   if (total > 0) void navigator.setAppBadge(total);
   else void navigator.clearAppBadge();
@@ -118,7 +118,7 @@ export async function maybeLocalDigest(leads: Lead[], me: Profile | null, pushAc
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const now = new Date();
   const today = todayISO(me.timezone, now);
-  const counts = digestCounts(leads, today, me.id);
+  const counts = digestCounts(leads, today);
   const dueCount = counts.today + counts.overdue;
   if (
     !shouldSendDigest({

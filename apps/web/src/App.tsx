@@ -71,7 +71,7 @@ function Shell() {
   const bare = ["loading", "auth", "signup", "reset", "password", "start", "join", "copy", "copy-error"].includes(book.phase);
   const tabbed = book.phase === "app" && (book.screen === "today" || book.screen === "leads" || book.screen === "customers");
   const showFab = book.screen === "today" || book.screen === "leads" || book.screen === "customers";
-  const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone), book.me.id) : { today: 0, overdue: 0 };
+  const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
   const badge = dueCounts.today + dueCounts.overdue;
   const syncLabel = syncStatusLabel(book.sync, book.syncedAt);
   const lead = book.leads.find((item) => item.id === book.detailId);

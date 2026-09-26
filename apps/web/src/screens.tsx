@@ -1193,7 +1193,8 @@ export function MemberScreen() {
   const sold = soldThisMonth(owned, today);
   const lost = owned.filter((lead) => lead.status === "lost").length;
   const time = clock(person.notifyMinute);
-  const line = digestLine(counts.today, counts.overdue);
+  const alertCounts = digestCounts(book.leads, today);
+  const line = digestLine(alertCounts.today, alertCounts.overdue);
   return (
     <div className="settings">
       <section className="part">
@@ -1290,6 +1291,7 @@ export function MemberScreen() {
                 <p className="push-title">Follow-ups</p>
                 <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
               </div>
+              <p className="meta">Everyone with alerts on gets this at the time they chose. It counts every open follow-up in the book.</p>
               <button className="ghost wide" type="button" onClick={() => void book.sendTestAlert()}>
                 Send a test alert
               </button>

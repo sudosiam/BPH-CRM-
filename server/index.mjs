@@ -391,7 +391,7 @@ export function createBook(dataFile) {
       if (!profile.notifyEnabled || profile.removedAt) continue;
       const leads = state.leads.filter((lead) => lead.orgId === profile.orgId);
       const today = todayISO(profile.timezone || "UTC", now);
-      const counts = digestCounts(leads, today, profile.id);
+      const counts = digestCounts(leads, today);
       const dueCount = counts.today + counts.overdue;
       if (
         !shouldSendDigest({
