@@ -114,6 +114,12 @@ export function nextCustomerName(names) {
   return `Customer ${max + 1}`;
 }
 
+export function hasLocalBook(input) {
+  if (!input.userId || !input.hasProfile) return false;
+  if (input.fullSyncComplete || input.leadCount > 0) return true;
+  return !input.hasOrg;
+}
+
 export function relativeTime(iso, now = Date.now()) {
   const minutes = Math.round((now - new Date(iso).getTime()) / 60000);
   if (minutes < 1) return "Just now";

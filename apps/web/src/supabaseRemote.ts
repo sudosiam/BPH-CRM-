@@ -67,15 +67,19 @@ function toRow(lead: Lead, userId: string) {
 }
 
 async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
-  const { data } = await supabase.auth.getSession();
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
   const session = data.session;
   if (!session) return null;
-  const { data: profileRow } = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+  const profileResult = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+  if (profileResult.error) throw new Error(profileResult.error.message);
+  const profileRow = profileResult.data;
   const profile = profileRow && !profileRow.removed_at ? mapProfile(profileRow) : null;
   let org: Org | null = null;
   if (profile) {
-    const { data: orgRow } = await supabase.from("orgs").select("*").eq("id", profile.orgId).maybeSingle();
-    org = orgRow ? mapOrg(orgRow, profile.role) : null;
+    const orgResult = await supabase.from("orgs").select("*").eq("id", profile.orgId).maybeSingle();
+    if (orgResult.error) throw new Error(orgResult.error.message);
+    org = orgResult.data ? mapOrg(orgResult.data, profile.role) : null;
   }
   return {
     user: {
@@ -218,14 +222,16 @@ export function createSupabaseRemote() {
     subscribe(onChange: () => void) {
       let orgId = "";
       const channel = supabase.channel("bph-book");
-      void loadAccount(supabase).then((account) => {
-        orgId = account?.org?.id ?? "";
-        if (!orgId) return;
-        channel
-          .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `org_id=eq.${orgId}` }, () => onChange())
-          .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `org_id=eq.${orgId}` }, () => onChange())
-          .subscribe();
-      });
+      void loadAccount(supabase)
+        .then((account) => {
+          orgId = account?.org?.id ?? "";
+          if (!orgId) return;
+          channel
+            .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `org_id=eq.${orgId}` }, () => onChange())
+            .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `org_id=eq.${orgId}` }, () => onChange())
+            .subscribe();
+        })
+        .catch(() => {});
       return () => {
         void supabase.removeChannel(channel);
       };

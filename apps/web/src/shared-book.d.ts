@@ -23,5 +23,12 @@ declare module "@shared/book.mjs" {
   export function dueMeta(iso: string | null, today: string): { text: string; className: string };
   export function initials(name: string): string;
   export function nextCustomerName(names: string[]): string;
+  export function hasLocalBook(input: {
+    userId: string;
+    hasProfile: boolean;
+    hasOrg: boolean;
+    fullSyncComplete: boolean;
+    leadCount: number;
+  }): boolean;
   export function relativeTime(iso: string, now?: number): string;
 }

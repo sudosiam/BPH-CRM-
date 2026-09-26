@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, nextCustomerName, todayISO } from "@shared/book.mjs";
+import { addDays, hasLocalBook, nextCustomerName, todayISO } from "@shared/book.mjs";
 import { db, resetLocal } from "./db";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
 import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
-import type { Account, Lead, Org, Profile } from "./types";
+import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "start" | "join" | "copy" | "copy-error" | "app";
 type Screen = "today" | "leads" | "account" | "detail" | "edit";
@@ -188,19 +188,70 @@ export function BookProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function keepSavedBook(saved: Meta | undefined, profiles: Profile[], leadCount: number) {
+    const me = profiles.find((profile) => profile.id === saved?.userId && !profile.removedAt);
+    const ready = hasLocalBook({
+      userId: saved?.userId ?? "",
+      hasProfile: Boolean(me),
+      hasOrg: Boolean(saved?.org),
+      fullSyncComplete: Boolean(saved?.fullSyncComplete),
+      leadCount,
+    });
+    if (!ready || !saved || !me) return false;
+    if (!saved.org || !saved.fullSyncComplete) {
+      await saveMeta({
+        token: saved.token,
+        userId: saved.userId,
+        email: saved.email,
+        org: saved.org ?? { id: me.orgId, name: "Your book", inviteCode: null },
+        fullSyncComplete: true,
+        cursor: saved.cursor,
+      });
+    }
+    return true;
+  }
+
   useEffect(() => {
     let cancel = false;
+    let opened = false;
     (async () => {
       const saved = await db.meta.get("local");
       if (!usingSupabase) setHttpToken(saved?.token ?? "");
-      const account = await remote.session().catch(() => null);
+      const profiles = await db.profiles.toArray();
+      const leadCount = await db.leads.count();
+      opened = await keepSavedBook(saved, profiles, leadCount);
       if (cancel) return;
-      if (!account) {
+      if (opened && saved) {
+        setUserId(saved.userId);
+        setEmail(saved.email);
+        setHeld(true);
+        setPhase("app");
+      }
+      let account: Account | null = null;
+      try {
+        account = await remote.session();
+      } catch {
+        if (cancel || opened) {
+          if (opened) setHeld(true);
+          return;
+        }
         setPhase("auth");
         return;
       }
+      if (cancel) return;
+      if (!account) {
+        if (opened && !navigator.onLine) return;
+        setPhase("auth");
+        return;
+      }
+      if ((!account.profile || !account.org) && opened && saved?.userId === account.user.id) {
+        setHeld(true);
+        return;
+      }
       await openAccount(account, false);
-    })().catch(() => setPhase("auth"));
+    })().catch(() => {
+      if (!cancel && !opened) setPhase("auth");
+    });
     return () => {
       cancel = true;
     };
@@ -251,7 +302,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     me,
     org,
     email,
-    sync: syncing ? "syncing" : outboxCount > 0 && (!online || held) ? "saved" : "synced",
+    sync: syncing ? "syncing" : !online || held || outboxCount > 0 ? "saved" : "synced",
     copyPct,
     copyLabel,
     error,
@@ -488,7 +539,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
     } catch {
       /* Clearing the phone copy is still the right next step. */
     }
-    await remote.signOut();
+    try {
+      await remote.signOut();
+    } catch {
+      /* The phone copy is cleared either way. */
+    }
     await resetLocal();
     setHttpToken("");
     setUserId("");
