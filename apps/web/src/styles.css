@@ -468,6 +468,17 @@ h1 {
   box-shadow: 0 10px 28px rgba(40, 32, 20, 0.04);
 }
 
+.empty { text-align: center; }
+.empty::before {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #f8fbf9 0%, #d5ebe1 48%, #8fb9a4 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 253, 248, 0.7);
+}
 .empty h2 { margin: 0 0 6px; font-size: 20px; letter-spacing: -0.03em; }
 .empty p { margin: 0; }
 
@@ -537,7 +548,19 @@ h1 {
 .status-switch { margin-top: 16px; }
 .status-switch button { flex: 1; }
 
-.detail h1 { margin: 4px 0 0; }
+.detail-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 16px;
+  box-shadow: 0 10px 28px rgba(40, 32, 20, 0.04);
+}
+.detail-hero .avatar { width: 64px; height: 64px; font-size: 20px; }
+.detail-hero h1 { margin: 0; font-size: 26px; }
+.detail-hero .meta { margin: 2px 0 0; }
 .detail .status-switch { margin-top: 14px; }
 .detail .card-block { margin-top: 14px; }
 .detail .card-block .field { margin-top: 12px; }
@@ -554,6 +577,7 @@ h1 {
 
 .detail-lines {
   margin-top: 16px;
+  padding: 0 4px;
 }
 
 .detail-lines p {
@@ -688,13 +712,18 @@ h1 {
 }
 
 .delete-link {
-  margin: 22px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 16px 0 8px;
   border: 0;
-  background: transparent;
+  border-radius: 16px;
+  background: var(--overdue-soft);
   color: var(--overdue);
   font-weight: 800;
-  min-height: 44px;
-  padding: 0;
+  min-height: 48px;
+  padding: 0 16px;
 }
 
 .auth {
@@ -703,6 +732,36 @@ h1 {
 }
 
 .auth h1 { margin-top: 8px; font-size: 34px; }
+.panel, .editor {
+  margin-top: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 4px 16px 16px;
+  box-shadow: 0 10px 28px rgba(40, 32, 20, 0.04);
+}
+.panel .field input,
+.panel .field textarea,
+.editor .field input,
+.editor .field textarea,
+.card-block .field input,
+.card-block .field textarea,
+.card-block .field select {
+  background: #f6f3ec;
+  box-shadow: none;
+}
+.panel .primary, .editor .primary { box-shadow: none; }
+.copy-card {
+  width: min(100%, 320px);
+  margin-top: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 10px 28px rgba(40, 32, 20, 0.04);
+}
+.copy-card .track { width: 100%; margin-top: 0; height: 8px; }
+.copy-card .meta { margin: 10px 0 0; }
 .auth .lede { margin: 8px 0 6px; }
 .auth .linkish {
   display: block;
@@ -752,7 +811,7 @@ h1 {
   max-width: 12em;
 }
 .boot .lede { max-width: 28em; margin-top: 8px; }
-.boot .track, .boot .form-actions { width: min(100%, 320px); }
+.boot .form-actions { width: min(100%, 320px); }
 .track {
   margin-top: 22px;
   height: 6px;

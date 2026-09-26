@@ -57,6 +57,7 @@ export function AuthScreen() {
     <section className="auth">
       <h1>Sign in</h1>
       <p className="lede">Your leads stay on this phone and sync with the team.</p>
+      <div className="panel">
       <label className="field">
         <span>Email</span>
         <input type="email" autoComplete="username" placeholder="you@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -70,6 +71,7 @@ export function AuthScreen() {
         <button className="primary" type="button" onClick={() => void book.signIn(email, password)}>
           Sign in
         </button>
+      </div>
       </div>
       <button className="linkish" type="button" onClick={() => book.setPhase("signup")}>
         Create an account
@@ -88,6 +90,7 @@ export function ResetScreen() {
     <section className="auth">
       <h1>Reset password</h1>
       <p className="lede">We will email a link if this address has an account.</p>
+      <div className="panel">
       <label className="field">
         <span>Email</span>
         <input type="email" autoComplete="username" placeholder="you@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -97,6 +100,7 @@ export function ResetScreen() {
         <button className="primary" type="button" onClick={() => void book.requestPasswordReset(email)}>
           Send reset link
         </button>
+      </div>
       </div>
       <button className="linkish" type="button" onClick={() => book.setPhase("auth")}>
         Back to sign in
@@ -115,6 +119,7 @@ export function PasswordScreen() {
     <section className="auth">
       <h1>New password</h1>
       <p className="lede">Choose a password for this account.</p>
+      <div className="panel">
       <label className="field">
         <span>Password</span>
         <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
@@ -144,6 +149,7 @@ export function PasswordScreen() {
           Save password
         </button>
       </div>
+      </div>
       <button className="linkish" type="button" onClick={() => void book.signOut()}>
         Back to sign in
       </button>
@@ -160,6 +166,7 @@ export function SignupScreen() {
     <section className="auth">
       <h1>Create an account</h1>
       <p className="lede">Then start a business or join one with a code.</p>
+      <div className="panel">
       <label className="field">
         <span>Your name</span>
         <input maxLength={80} placeholder="Your name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
@@ -177,6 +184,7 @@ export function SignupScreen() {
         <button className="primary" type="button" onClick={() => void book.signUp(email, password, displayName)}>
           Create account
         </button>
+      </div>
       </div>
       <button className="linkish" type="button" onClick={() => book.setPhase("auth")}>
         Back to sign in
@@ -210,6 +218,7 @@ export function StartScreen() {
     <section className="auth">
       <h1>Start a business</h1>
       <p className="lede">You become the owner of a shared book. Teammates join with a code.</p>
+      <div className="panel">
       <label className="field">
         <span>Business name</span>
         <input maxLength={80} placeholder="Shop or company" value={name} onChange={(event) => setName(event.target.value)} />
@@ -223,6 +232,7 @@ export function StartScreen() {
         <button className="primary" type="button" onClick={() => void book.createOrg(name, displayName)}>
           Create business
         </button>
+      </div>
       </div>
       <button className="linkish" type="button" onClick={() => book.setPhase("join")}>
         Join with a code
@@ -239,6 +249,7 @@ export function JoinScreen() {
     <section className="auth">
       <h1>Join with a code</h1>
       <p className="lede">The code is in a teammate's Settings.</p>
+      <div className="panel">
       <label className="field">
         <span>Invite code</span>
         <input maxLength={12} autoCapitalize="characters" placeholder="ABCD1234" value={code} onChange={(event) => setCode(event.target.value)} />
@@ -252,6 +263,7 @@ export function JoinScreen() {
         <button className="primary" type="button" onClick={() => void book.joinOrg(code, displayName)}>
           Join
         </button>
+      </div>
       </div>
       <button className="linkish" type="button" onClick={() => book.setPhase("start")}>
         Start a business
@@ -289,14 +301,14 @@ export function CopyScreen() {
           : "This happens once on each phone. After that, Today opens straight away."}
       </p>
       {failed ? null : (
-        <>
+        <div className="copy-card">
           <div className="track" aria-hidden="true">
             <div id="boot-bar" style={{ width: `${book.copyPct}%` }} />
           </div>
           <p className="meta">
             {book.copyLabel} · {Math.round(book.copyPct)}%
           </p>
-        </>
+        </div>
       )}
       {failed ? (
         <div className="form-actions">
@@ -474,7 +486,7 @@ export function LeadsScreen() {
           {rows.map((lead) => {
             const sub =
               lead.status === "sold"
-                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, className: "quiet" }
+                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}${lead.soldAmount ? ` · ৳${lead.soldAmount}` : ""}`, className: "quiet" }
                 : lead.status === "lost"
                   ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, className: "quiet" }
                   : dueMeta(lead.followUpOn, today);
@@ -527,7 +539,15 @@ export function DetailScreen() {
   const recent = activity.slice(-8).reverse();
   return (
     <div className="detail">
-      <h1>{lead.name}</h1>
+      <div className="detail-hero">
+        <span className="avatar" style={{ background: tone(lead.name) }}>
+          {initials(lead.name)}
+        </span>
+        <div>
+          <h1>{lead.name}</h1>
+          <p className="meta">Owner · {adder}</p>
+        </div>
+      </div>
       <div className="status-switch" role="group" aria-label="Status">
         {(["lead", "sold", "lost"] as const).map((status) => (
           <button key={status} type="button" className={lead.status === status ? "on" : ""} onClick={() => void book.setStatus(status)}>
@@ -642,7 +662,6 @@ export function DetailScreen() {
         </div>
       ) : null}
       <div className="detail-lines">
-        <p>Owner · {adder}</p>
         <p>
           Last change · {ownerName(book.profiles, lead.updatedBy, book.me)} · {relativeTime(lead.updatedAt)}
         </p>
@@ -706,7 +725,7 @@ export function EditScreen() {
     book.setEditorDirty(true);
   }
   return (
-    <>
+    <div className="editor">
       <label className="field">
         <span>Name</span>
         <input maxLength={120} value={draft.name} placeholder="Optional" onChange={(event) => update({ ...draft, name: event.target.value })} />
@@ -756,7 +775,7 @@ export function EditScreen() {
           Save
         </button>
       </div>
-    </>
+    </div>
   );
 }
 
