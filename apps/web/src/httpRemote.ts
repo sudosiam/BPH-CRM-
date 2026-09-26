@@ -1,6 +1,7 @@
 import type { Account, Lead, Org, Profile, Pull, PushResult } from "./types";
 
 let token = "";
+let resetToken = "";
 
 export function setHttpToken(value: string) {
   token = value;
@@ -103,16 +104,43 @@ export function createHttpRemote() {
       });
       if (!response.ok) throw new Error(data.error || "Could not transfer the business.");
     },
-    async requestPasswordReset(_email: string) {
-      const { response, data } = await request("/api/auth/reset", { method: "POST", body: JSON.stringify({}) });
+    async requestPasswordReset(email: string) {
+      const { response, data } = await request("/api/auth/reset", { method: "POST", body: JSON.stringify({ email }) });
       if (!response.ok) throw new Error(data.error || "Could not reset the password.");
       return { sent: Boolean(data.sent), message: String(data.message || "Check your email.") };
     },
     async passwordRecovery() {
-      return false;
+      const token = new URLSearchParams(window.location.search).get("reset") || "";
+      if (!token) return false;
+      resetToken = token;
+      const next = new URL(window.location.href);
+      next.searchParams.delete("reset");
+      window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+      return true;
     },
-    async updatePassword(_password: string) {
-      throw new Error("This server cannot change the password.");
+    async updatePassword(password: string) {
+      if (!resetToken) throw new Error("Open the link from your email, or ask the owner to set a password.");
+      const { response, data } = await request("/api/auth/reset/confirm", {
+        method: "POST",
+        body: JSON.stringify({ token: resetToken, password }),
+      });
+      if (!response.ok) throw new Error(data.error || "Could not update the password.");
+      resetToken = "";
+      account(data);
+    },
+    async changePassword(currentPassword: string, password: string) {
+      const { response, data } = await request("/api/auth/password", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword, password }),
+      });
+      if (!response.ok) throw new Error(data.error || "Could not update the password.");
+    },
+    async setMemberPassword(memberId: string, password: string) {
+      const { response, data } = await request("/api/orgs/members/password", {
+        method: "POST",
+        body: JSON.stringify({ memberId, password }),
+      });
+      if (!response.ok) throw new Error(data.error || "Could not set the password.");
     },
     async updateProfile(patch: Partial<Profile>) {
       const { response, data } = await request("/api/profile", {

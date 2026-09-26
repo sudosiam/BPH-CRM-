@@ -139,7 +139,7 @@ export function PasswordScreen() {
       <div className="panel">
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
       <label className="field">
         <span>Again</span>
@@ -151,8 +151,8 @@ export function PasswordScreen() {
           className="primary"
           type="button"
           onClick={() => {
-            if (password.length < 6) {
-              setLocalError("Use at least 6 characters.");
+            if (password.length < 8) {
+              setLocalError("Use at least 8 characters.");
               return;
             }
             if (password !== again) {
@@ -193,7 +193,7 @@ export function SignupScreen() {
       </label>
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
@@ -313,6 +313,7 @@ export function CopyScreen() {
       )}
       {failed ? (
         <div className="form-actions">
+          <p className="meta">The book stays put until this phone has it. BPH tries again when the connection is back.</p>
           <button className="primary" type="button" onClick={() => void book.retryCopy()}>
             Try again
           </button>
@@ -959,6 +960,63 @@ export function EditScreen() {
 
 const REMINDER_SHORTCUTS = [420, 480, 540, 1080];
 
+function phoneNeedsHomeScreen() {
+  if (typeof navigator === "undefined") return false;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  return ios && !standalone;
+}
+
+function PasswordEditor({
+  requireCurrent,
+  onSave,
+}: {
+  requireCurrent?: boolean;
+  onSave: (current: string, next: string) => Promise<void>;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  return (
+    <div className="card-block">
+      {requireCurrent ? (
+        <label className="field">
+          <span>Current password</span>
+          <input type="password" autoComplete="current-password" value={current} onChange={(event) => setCurrent(event.target.value)} />
+        </label>
+      ) : null}
+      <label className="field">
+        <span>New password</span>
+        <input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={next} onChange={(event) => setNext(event.target.value)} />
+      </label>
+      {error ? <p className="form-error">{error}</p> : null}
+      <button
+        className="ghost wide"
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          if (next.length < 8) {
+            setError("Use at least 8 characters.");
+            return;
+          }
+          setError("");
+          setPending(true);
+          void onSave(current, next)
+            .then(() => {
+              setCurrent("");
+              setNext("");
+            })
+            .catch((reason) => setError(reason instanceof Error ? reason.message : "Could not update the password."))
+            .finally(() => setPending(false));
+        }}
+      >
+        {pending ? "Saving…" : "Save password"}
+      </button>
+    </div>
+  );
+}
+
 function clock(minute: number) {
   const safe = ((minute % 1440) + 1440) % 1440;
   return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
@@ -1235,6 +1293,9 @@ export function MemberScreen() {
               <button className="ghost wide" type="button" onClick={() => void book.sendTestAlert()}>
                 Send a test alert
               </button>
+              {phoneNeedsHomeScreen() ? (
+                <p className="meta">On iPhone, add BPH to the Home Screen. Alerts while the app is closed arrive only there, on iOS 16.4 or later. Today is the list either way.</p>
+              ) : null}
             </>
           ) : (
             <>
@@ -1244,6 +1305,16 @@ export function MemberScreen() {
           )}
         </div>
       </section>
+      {mine || me.role === "owner" ? (
+        <section className="part">
+          <p className="part-label">Password</p>
+          {mine ? (
+            <PasswordEditor requireCurrent onSave={(current, next) => book.changePassword(current, next)} />
+          ) : (
+            <PasswordEditor onSave={(_current, next) => book.setMemberPassword(person.id, next)} />
+          )}
+        </section>
+      ) : null}
       {me.role === "owner" && !mine ? (
         <section className="part">
           <p className="part-label">Owner</p>

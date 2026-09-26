@@ -451,3 +451,94 @@ test("a test alert requires a signed-in phone and sends nothing when none is sub
     server.close();
   }
 });
+
+test("two servers sharing one book keep both accounts", async () => {
+  const dataFile = path.join(mkdtempSync(path.join(tmpdir(), "bph-lock-")), "book.json");
+  const first = await startServer({ port: 0, dataFile });
+  const second = await startServer({ port: 0, dataFile });
+  const one = `http://127.0.0.1:${first.port}`;
+  const two = `http://127.0.0.1:${second.port}`;
+  try {
+    const [alpha, beta] = await Promise.all([
+      json(one, "/api/auth/signup", { method: "POST", body: { email: "alpha@bph.example", password: "password1", displayName: "Alpha" } }),
+      json(two, "/api/auth/signup", { method: "POST", body: { email: "beta@bph.example", password: "password1", displayName: "Beta" } }),
+    ]);
+    assert.equal(alpha.status, 200);
+    assert.equal(beta.status, 200);
+    const betaOnFirst = await json(one, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "beta@bph.example", password: "password1" },
+    });
+    const alphaOnSecond = await json(two, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "alpha@bph.example", password: "password1" },
+    });
+    assert.equal(betaOnFirst.status, 200);
+    assert.equal(alphaOnSecond.status, 200);
+  } finally {
+    first.server.close();
+    second.server.close();
+  }
+});
+
+test("owner can set a password and a person can change their own", async () => {
+  const { server, base } = await boot();
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "owner-pass@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    const created = await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    const mate = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "mate-pass@bph.example", password: "password1", displayName: "Nadia" },
+    });
+    await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: mate.data.token,
+      body: { code: created.data.org.inviteCode, displayName: "Nadia", timezone: "UTC" },
+    });
+    const reset = await json(base, "/api/auth/reset", { method: "POST", body: { email: "mate-pass@bph.example" } });
+    assert.equal(reset.status, 200);
+    assert.equal(reset.data.sent, false);
+    const set = await json(base, "/api/orgs/members/password", {
+      method: "POST",
+      token: owner.data.token,
+      body: { memberId: mate.data.user.id, password: "password2" },
+    });
+    assert.equal(set.status, 200);
+    const old = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "mate-pass@bph.example", password: "password1" },
+    });
+    assert.equal(old.status, 401);
+    const signed = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "mate-pass@bph.example", password: "password2" },
+    });
+    assert.equal(signed.status, 200);
+    const changed = await json(base, "/api/auth/password", {
+      method: "POST",
+      token: signed.data.token,
+      body: { currentPassword: "password2", password: "password3" },
+    });
+    assert.equal(changed.status, 200);
+    const again = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "mate-pass@bph.example", password: "password3" },
+    });
+    assert.equal(again.status, 200);
+    const wrong = await json(base, "/api/auth/password", {
+      method: "POST",
+      token: again.data.token,
+      body: { currentPassword: "nope", password: "password4" },
+    });
+    assert.equal(wrong.status, 400);
+  } finally {
+    server.close();
+  }
+});

@@ -4,7 +4,7 @@ import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpRes
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
-import { enableNotifications, maybeLocalDigest, showTestNotification, syncBadge } from "./notify";
+import { enableNotifications, maybeLocalDigest, showTestNotification, subscribeToPush, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
 import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
@@ -112,6 +112,8 @@ type BookValue = {
   exportCsv: () => void;
   requestPasswordReset: (email: string) => Promise<void>;
   choosePassword: (password: string) => Promise<void>;
+  changePassword: (currentPassword: string, password: string) => Promise<void>;
+  setMemberPassword: (memberId: string, password: string) => Promise<void>;
   noteActivity: (leadId: string, text: string) => void;
   applyUpdate: () => void;
   showToast: (text: string) => void;
@@ -214,6 +216,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const hideFlushAt = useRef(0);
   const authEpoch = useRef(0);
   const signedOut = useRef(false);
+  const retryCopyRef = useRef<() => Promise<void>>(async () => {});
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -670,6 +673,29 @@ export function BookProvider({ children }: { children: ReactNode }) {
       window.clearInterval(poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "copy-error") return;
+    const run = () => {
+      if (navigator.onLine) void retryCopyRef.current();
+    };
+    window.addEventListener("online", run);
+    const timer = window.setInterval(run, 5000);
+    return () => {
+      window.removeEventListener("online", run);
+      window.clearInterval(timer);
+    };
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "app") return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    void subscribeToPush()
+      .then((ok) => {
+        if (ok) setPushActive(true);
+      })
+      .catch(() => undefined);
   }, [phase]);
 
   useEffect(() => {
@@ -1237,6 +1263,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setError(reason instanceof Error ? reason.message : "Could not send the reset email.");
       }
     },
+    async changePassword(currentPassword, password) {
+      await remote.changePassword(currentPassword, password);
+      showToast("Password updated");
+    },
+    async setMemberPassword(memberId, password) {
+      await remote.setMemberPassword(memberId, password);
+      showToast("Password set. Their other phones need to sign in again.");
+    },
     async choosePassword(password) {
       setError("");
       try {
@@ -1420,6 +1454,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     });
   }
 
+  retryCopyRef.current = value.retryCopy;
   return <BookContext.Provider value={value}>{children}</BookContext.Provider>;
 }
 

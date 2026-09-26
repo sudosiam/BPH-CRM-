@@ -47,6 +47,11 @@ declare module "@shared/book.mjs" {
       updatedAt?: string;
     }>,
   ): string;
+  export function mergeLeadFields(
+    base: Record<string, unknown> | null | undefined,
+    local: Record<string, unknown> | null | undefined,
+    server: Record<string, unknown> | null | undefined,
+  ): { lead: Record<string, unknown>; conflicts: string[] };
   export function mergeLead<T extends Record<string, unknown>>(server: T, local: T): T;
   export function safeTimeZone(timeZone?: string): string;
   export function hasLocalBook(input: {

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "nodemailer": "^10.0.10",
     "web-push": "^3.6.7"
   }
 }

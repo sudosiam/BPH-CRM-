@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, followUpResult, mergeLead, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
+import { customerMatches, followUpResult, mergeLead, mergeLeadFields, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(followUpResult("no-answer", "2026-09-26", "2026-09-20").followUpOn, "2026-09-27");
@@ -62,4 +62,20 @@ test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(merged.lastContactAt, "b");
   assert.deepEqual(merged.tags, ["Scooty"]);
   assert.equal(merged.version, 4);
+  const combined = mergeLeadFields(
+    { name: "Ada", notes: "old", phone: "1", tags: [] },
+    { name: "Ada", notes: "called", phone: "1", tags: ["Scooty"] },
+    { name: "Ada Khan", notes: "old", phone: "1", tags: [], version: 3 },
+  );
+  assert.deepEqual(combined.conflicts, []);
+  assert.equal(combined.lead.name, "Ada Khan");
+  assert.equal(combined.lead.notes, "called");
+  assert.deepEqual(combined.lead.tags, ["Scooty"]);
+  const clash = mergeLeadFields(
+    { name: "Ada", notes: "old" },
+    { name: "Local", notes: "old" },
+    { name: "Server", notes: "old" },
+  );
+  assert.deepEqual(clash.conflicts, ["name"]);
+  assert.equal(clash.lead.name, "Server");
 });

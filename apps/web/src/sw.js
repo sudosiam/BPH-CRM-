@@ -14,7 +14,12 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  const data = event.data ? event.data.json() : { title: "Follow-ups", body: "" };
+  let data = { title: "Follow-ups", body: "" };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch {
+    data = { ...data, body: event.data ? event.data.text() : "" };
+  }
   event.waitUntil(
     self.registration.showNotification(data.title || "Follow-ups", {
       body: data.body || "",
