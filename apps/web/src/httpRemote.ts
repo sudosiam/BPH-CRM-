@@ -39,13 +39,15 @@ export function createHttpRemote() {
       if (!response.ok) throw new Error(data.error || "Could not create the account.");
       return account(data);
     },
-    async signIn(email: string, password: string) {
+    async signIn(email: string, password: string, onReady?: (user: { id: string; email: string }) => void | Promise<void>) {
       const { response, data } = await request("/api/auth/signin", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
       if (!response.ok) throw new Error(data.error || "Could not sign in.");
-      return account(data);
+      const signed = account(data);
+      if (onReady) await onReady({ id: signed.user.id, email: signed.user.email });
+      return signed;
     },
     async signOut() {
       await request("/api/auth/signout", { method: "POST" });

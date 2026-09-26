@@ -64,6 +64,7 @@ export function AuthScreen() {
   const book = useBook();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false);
   return (
     <section className="auth">
       <h1>Sign in</h1>
@@ -78,8 +79,16 @@ export function AuthScreen() {
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
-        <button className="primary" type="button" onClick={() => void book.signIn(email, password)}>
-          Sign in
+        <button
+          className="primary"
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            setPending(true);
+            void book.signIn(email, password).finally(() => setPending(false));
+          }}
+        >
+          {pending ? "Signing in…" : "Sign in"}
         </button>
       </div>
       </div>

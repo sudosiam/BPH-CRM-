@@ -212,6 +212,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const soldSeq = useRef(0);
   const soldPending = useRef<{ id: string; amount: number | null; seq: number } | null>(null);
   const hideFlushAt = useRef(0);
+  const authEpoch = useRef(0);
+  const signedOut = useRef(false);
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -320,6 +322,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
 
   function syncNow(opts?: { force?: boolean }) {
     return enqueueSync(async () => {
+      if (signedOut.current) return;
       if (document.hidden && !opts?.force) return;
       const metaRow = await db.meta.get("local");
       const pending = await db.outbox.count();
@@ -480,14 +483,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancel = false;
     let opened = false;
+    let epoch = authEpoch.current;
     (async () => {
+      epoch = authEpoch.current;
       let recovering = false;
       try {
         recovering = await remote.passwordRecovery();
       } catch {
         recovering = false;
       }
-      if (cancel) return;
+      if (cancel || authEpoch.current !== epoch) return;
       if (recovering) {
         setPhase("password");
         return;
@@ -499,7 +504,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       ]);
       if (!usingSupabase) setHttpToken(saved?.token ?? "");
       opened = await keepSavedBook(saved, profileRows, leadCount);
-      if (cancel) return;
+      if (cancel || authEpoch.current !== epoch) return;
       if (opened && saved) {
         setUserId(saved.userId);
         setEmail(saved.email);
@@ -507,7 +512,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setPhase("app");
       }
       await afterPaint();
-      if (cancel) return;
+      if (cancel || authEpoch.current !== epoch) return;
       if (opened && saved) {
         const pendingSold = readPendingSold();
         if (pendingSold) {
@@ -520,11 +525,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
       try {
         account = await remote.session();
       } catch {
+        if (cancel || authEpoch.current !== epoch) return;
         if (opened) setHeld(true);
         else setPhase("auth");
         return;
       }
-      if (cancel) return;
+      if (cancel || authEpoch.current !== epoch) return;
       if (!account) {
         if (!opened) setPhase("auth");
         return;
@@ -542,7 +548,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       }
       await openAccount(account, false);
     })().catch(() => {
-      if (!cancel && !opened) setPhase("auth");
+      if (!cancel && authEpoch.current === epoch && !opened) setPhase("auth");
     });
     return () => {
       cancel = true;
@@ -789,11 +795,34 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     setSheet,
     async signIn(emailAddress, password) {
+      signedOut.current = false;
+      const epoch = ++authEpoch.current;
       setError("");
+      let showedBook = false;
       try {
         await flushBeforeSwitch();
-        await openAccount(await remote.signIn(emailAddress, password), false);
+        if (authEpoch.current !== epoch) return;
+        const account = await remote.signIn(emailAddress, password, async (user) => {
+          const saved = await db.meta.get("local");
+          if (!saved?.fullSyncComplete || saved.userId !== user.id || !saved.org) return;
+          const me = await db.profiles.get(user.id);
+          if (!me || me.removedAt || authEpoch.current !== epoch) return;
+          await tokenFor(user.id, user.email, saved.org);
+          if (authEpoch.current !== epoch) return;
+          setPhase("app");
+          setStack(["today"]);
+          showedBook = true;
+          void syncNow();
+        });
+        if (authEpoch.current !== epoch) return;
+        if (showedBook) {
+          if (account.profile && account.org) await tokenFor(account.user.id, account.user.email, account.org);
+          return;
+        }
+        await openAccount(account, false);
       } catch (reason) {
+        if (authEpoch.current !== epoch || showedBook) return;
+        setPhase("auth");
         setError(reason instanceof Error ? reason.message : "Could not sign in.");
       }
     },
@@ -1349,23 +1378,27 @@ export function BookProvider({ children }: { children: ReactNode }) {
   };
 
   async function finishSignOut() {
-    try {
-      await enqueueSync(() => flushOutbox(() => {}));
-    } catch {
-      /* Clearing the phone copy is still the right next step. */
-    }
-    try {
-      await remote.signOut();
-    } catch {
-      /* The phone copy is cleared either way. */
-    }
-    await resetLocal();
+    const epoch = ++authEpoch.current;
+    signedOut.current = true;
+    window.clearTimeout(syncTimer.current);
     setHttpToken("");
     setUserId("");
     setEmail("");
     setStack(["today"]);
     setSheet(null);
+    setHeld(false);
+    setSyncing(false);
     setPhase("auth");
+    void enqueueSync(async () => {
+      if (authEpoch.current !== epoch) return;
+      await resetLocal();
+      if (authEpoch.current !== epoch) return;
+      try {
+        await remote.signOut();
+      } catch {
+        /* The phone copy is already cleared. */
+      }
+    });
   }
 
   return <BookContext.Provider value={value}>{children}</BookContext.Provider>;

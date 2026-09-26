@@ -144,12 +144,23 @@ async function membershipFromBook(supabase: SupabaseClient, userId: string): Pro
   };
 }
 
-async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw new Error(error.message);
-  const session = data.session;
-  if (!session) return null;
-  const profileResult = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+async function loadAccount(
+  supabase: SupabaseClient,
+  known?: { id: string; email?: string | null; displayName?: string },
+): Promise<Account | null> {
+  let userId = known?.id ?? "";
+  let email = known?.email ?? "";
+  let displayName = known?.displayName ?? "";
+  if (!userId) {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw new Error(error.message);
+    const session = data.session;
+    if (!session) return null;
+    userId = session.user.id;
+    email = session.user.email ?? "";
+    displayName = String(session.user.user_metadata?.display_name ?? "");
+  }
+  const profileResult = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
   if (profileResult.error && isNetworkError(profileResult.error)) throw new Error(profileResult.error.message);
   const profileRow = profileResult.error ? null : profileResult.data;
   const removed = Boolean(profileRow && profileRow.removed_at);
@@ -162,7 +173,7 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
     org = !orgResult.error && orgResult.data ? mapOrg(orgResult.data, profile.role) : null;
   }
   if (!removed && (!profile || !org)) {
-    const found = await membershipFromBook(supabase, session.user.id);
+    const found = await membershipFromBook(supabase, userId);
     if (found) {
       profile = profile ?? found.profile;
       org = org ?? found.org;
@@ -170,9 +181,9 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
   }
   return {
     user: {
-      id: session.user.id,
-      email: session.user.email ?? "",
-      displayName: profile?.displayName || String(session.user.user_metadata?.display_name ?? ""),
+      id: userId,
+      email,
+      displayName: profile?.displayName || displayName,
     },
     profile,
     org,
@@ -208,10 +219,18 @@ export function createSupabaseRemote() {
       account.user.displayName = displayName;
       return account;
     },
-    async signIn(email: string, password: string) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+    async signIn(email: string, password: string, onReady?: (user: { id: string; email: string }) => void | Promise<void>) {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
-      const account = await loadAccount(supabase);
+      const user = data.user;
+      if (!user) throw new Error("Could not sign in.");
+      const known = {
+        id: user.id,
+        email: user.email ?? email.trim(),
+        displayName: String(user.user_metadata?.display_name ?? ""),
+      };
+      if (onReady) await onReady({ id: known.id, email: known.email });
+      const account = await loadAccount(supabase, known);
       if (!account) throw new Error("Could not sign in.");
       return account;
     },
