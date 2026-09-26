@@ -67,7 +67,6 @@ export function AuthScreen() {
   return (
     <section className="auth">
       <h1>Sign in</h1>
-      <p className="lede">Your leads stay on this phone and sync with the team.</p>
       <div className="panel">
       <label className="field">
         <span>Email</span>
@@ -100,7 +99,6 @@ export function ResetScreen() {
   return (
     <section className="auth">
       <h1>Reset password</h1>
-      <p className="lede">We will email a link if this address has an account.</p>
       <div className="panel">
       <label className="field">
         <span>Email</span>
@@ -129,7 +127,6 @@ export function PasswordScreen() {
   return (
     <section className="auth">
       <h1>New password</h1>
-      <p className="lede">Choose a password for this account.</p>
       <div className="panel">
       <label className="field">
         <span>Password</span>
@@ -176,7 +173,6 @@ export function SignupScreen() {
   return (
     <section className="auth">
       <h1>Create an account</h1>
-      <p className="lede">Then start a business or join one with a code.</p>
       <div className="panel">
       <label className="field">
         <span>Your name</span>
@@ -212,7 +208,6 @@ export function StartScreen() {
     return (
       <section className="auth">
         <h1>Open {book.remembered.orgName}</h1>
-        <p className="lede">This account is already in that shared book. You do not need a new code.</p>
         {book.error ? <p className="form-error">{book.error}</p> : null}
         <div className="form-actions">
           <button className="primary" type="button" onClick={() => void book.reopenBook()}>
@@ -228,7 +223,6 @@ export function StartScreen() {
   return (
     <section className="auth">
       <h1>Start a business</h1>
-      <p className="lede">You become the owner of a shared book. Teammates join with a code.</p>
       <div className="panel">
       <label className="field">
         <span>Business name</span>
@@ -259,7 +253,6 @@ export function JoinScreen() {
   return (
     <section className="auth">
       <h1>Join with a code</h1>
-      <p className="lede">The code is in a teammate's Settings.</p>
       <div className="panel">
       <label className="field">
         <span>Invite code</span>
@@ -290,7 +283,6 @@ export function OpeningScreen() {
         <span />
       </div>
       <h1>Opening your book</h1>
-      <p className="lede">Your leads are already on this phone.</p>
     </section>
   );
 }
@@ -306,11 +298,6 @@ export function CopyScreen() {
         </div>
       )}
       <h1>{failed ? "The copy didn't finish" : "Saving the book on this phone"}</h1>
-      <p className="lede">
-        {failed
-          ? "The connection dropped before every lead arrived. Nothing was lost on the team."
-          : "This happens once on each phone. After that, Today opens straight away."}
-      </p>
       {failed ? null : (
         <div className="copy-card">
           <div className="track" aria-hidden="true">
@@ -367,7 +354,6 @@ export function TodayScreen() {
         <div className="reminder-card">
           <div>
             <strong>Reminders are off</strong>
-            <p className="meta">Get an alert for every follow-up that is overdue or due today.</p>
           </div>
           <button type="button" onClick={() => void book.setReminders(true)}>
             Turn on
@@ -384,7 +370,6 @@ export function TodayScreen() {
       {!overdue.length && !due.length ? (
         <div className="empty">
           <h2>Nothing overdue or due today</h2>
-          <p className="meta">Every follow-up on the team shows up here, no matter who added it.</p>
         </div>
       ) : null}
       {beyond ? (
@@ -528,7 +513,6 @@ export function LeadsScreen() {
       ) : (
         <div className="empty">
           <h2>{emptyTitle}</h2>
-          <p className="meta">{query ? "Try another name, phone, or note." : mine ? "None of these were added by you." : "They'll show up here."}</p>
         </div>
       )}
     </>
@@ -631,7 +615,6 @@ export function CustomersScreen() {
       ) : (
         <div className="empty">
           <h2>{filtering ? "No customers match" : "No customers yet"}</h2>
-          <p className="meta">{filtering ? "Clear a filter or try another name." : "Everyone you add shows up here."}</p>
         </div>
       )}
     </>
@@ -753,7 +736,7 @@ export function DetailScreen() {
       ) : (
         <div className="card-block">
           <h2>{labelStatus(lead.status)}</h2>
-          <p className="meta">Closed {prettyDate(lead.closedOn || today)}. Reminders are off.</p>
+          <p className="meta">Closed {prettyDate(lead.closedOn || today)}</p>
           {lead.status === "sold" ? (
             <label className="field">
               <span>Amount</span>
@@ -867,10 +850,9 @@ export function EditScreen() {
         <span>Name</span>
         <input maxLength={120} value={draft.name} placeholder="Optional" onChange={(event) => update({ ...draft, name: event.target.value })} />
       </label>
-      <p className="hint">Leave the name blank and BPH saves them as Customer 1, Customer 2, and so on.</p>
       <label className="field">
         <span>Phone</span>
-        <input maxLength={40} inputMode="tel" value={draft.phone} placeholder="+880…" onChange={(event) => update({ ...draft, phone: event.target.value })} />
+        <input maxLength={40} inputMode="tel" value={draft.phone} placeholder="Phone" onChange={(event) => update({ ...draft, phone: event.target.value })} />
       </label>
       <span className="field">
         <span>Source</span>
@@ -885,7 +867,6 @@ export function EditScreen() {
       <span className="field">
         <span>Tags</span>
       </span>
-      <p className="hint">Optional. Pick what they need.</p>
       <div className="chips">
         {CUSTOMER_TAGS.map((tag) => (
           <button
@@ -913,7 +894,6 @@ export function EditScreen() {
             <span>Date</span>
             <input type="date" value={draft.followUpOn || ""} onChange={(event) => update({ ...draft, followUpOn: event.target.value || null })} />
           </label>
-          <p className="hint">Without a date, BPH will not remind anyone.</p>
         </>
       ) : null}
       {book.conflictDraft ? <p className="meta">Someone else saved this lead. Your typing is still here.</p> : null}
@@ -1025,16 +1005,13 @@ export function AccountScreen() {
             <button className="linkish" type="button" onClick={() => void book.regenerateCode()}>
               New invite code
             </button>
-          ) : (
-            <p className="meta">You are already in this book. A new code is only for someone new.</p>
-          )}
+          ) : null}
         </div>
       </section>
       <section className="part">
         <p className="part-label">WhatsApp</p>
         <div className="card-block">
           <h2>Message template</h2>
-          <p className="meta">Used when you open WhatsApp from a lead. {"{name}"} becomes their name.</p>
           <label className="field">
             <span>Template</span>
             <textarea
@@ -1050,7 +1027,6 @@ export function AccountScreen() {
         <p className="part-label">This phone</p>
         <div className="card-block">
           <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
-          <p className="meta">The full book stays on this phone. Changes show up here right away, then reach the rest of the team.</p>
           <p className="meta">{book.leads.length} leads on this phone</p>
           <button className="linkish" type="button" onClick={book.exportCsv}>
             Download a backup
@@ -1151,7 +1127,6 @@ export function MemberScreen() {
           <h2>Daily alert</h2>
           {mine ? (
             <>
-              <p className="meta">One alert for the team's overdue follow-ups and anything due that day.</p>
               <label className="switch-row">
                 <span>Alerts</span>
                 <input
@@ -1185,11 +1160,6 @@ export function MemberScreen() {
                   </button>
                 ))}
               </div>
-              <p className="hint">
-                {book.pushReady
-                  ? "Add BPH to your home screen so the alert can arrive while the app is closed."
-                  : "Alerts show while BPH is open. Closed-app alerts are not set up on this server yet."}
-              </p>
               <p className="meta">Time zone · {person.timezone}</p>
               {phoneZone() !== person.timezone ? (
                 <button className="linkish" type="button" onClick={() => void book.usePhoneZone()}>
@@ -1207,7 +1177,6 @@ export function MemberScreen() {
               <button className="ghost wide" type="button" onClick={() => void book.sendTestAlert()}>
                 Send a test alert
               </button>
-              <p className="hint">Sends one alert to this phone right now. Reminders can stay off.</p>
             </>
           ) : (
             <>
