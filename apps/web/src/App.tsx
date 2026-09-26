@@ -5,6 +5,7 @@ import { digestCounts, relativeTime, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
   AuthScreen,
+  PasswordScreen,
   ResetScreen,
   CopyScreen,
   DetailScreen,
@@ -56,7 +57,7 @@ function useSystemBack(depth: number, onBack: () => void) {
 
 function Shell() {
   const book = useBook();
-  const bare = ["loading", "auth", "signup", "reset", "start", "join", "copy", "copy-error"].includes(book.phase);
+  const bare = ["loading", "auth", "signup", "reset", "password", "start", "join", "copy", "copy-error"].includes(book.phase);
   const tabbed = book.phase === "app" && (book.screen === "today" || book.screen === "leads");
   const showFab = book.screen === "today" || book.screen === "leads";
   const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
@@ -193,6 +194,7 @@ function Shell() {
         {book.phase === "auth" ? <AuthScreen /> : null}
         {book.phase === "signup" ? <SignupScreen /> : null}
         {book.phase === "reset" ? <ResetScreen /> : null}
+        {book.phase === "password" ? <PasswordScreen /> : null}
         {book.phase === "start" ? <StartScreen /> : null}
         {book.phase === "join" ? <JoinScreen /> : null}
         {book.phase === "copy" || book.phase === "copy-error" ? <CopyScreen /> : null}

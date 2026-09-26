@@ -107,6 +107,53 @@ export function ResetScreen() {
   );
 }
 
+export function PasswordScreen() {
+  const book = useBook();
+  const [password, setPassword] = useState("");
+  const [again, setAgain] = useState("");
+  const [localError, setLocalError] = useState("");
+  const message = localError || book.error;
+  return (
+    <section className="auth">
+      <p className="wordmark">BPH</p>
+      <h1>New password</h1>
+      <p className="lede">Choose a password for this account.</p>
+      <label className="field">
+        <span>Password</span>
+        <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
+      </label>
+      <label className="field">
+        <span>Again</span>
+        <input type="password" autoComplete="new-password" placeholder="Repeat the password" value={again} onChange={(event) => setAgain(event.target.value)} />
+      </label>
+      {message ? <p className="form-error">{message}</p> : null}
+      <div className="form-actions">
+        <button
+          className="primary"
+          type="button"
+          onClick={() => {
+            if (password.length < 6) {
+              setLocalError("Use at least 6 characters.");
+              return;
+            }
+            if (password !== again) {
+              setLocalError("Those passwords do not match.");
+              return;
+            }
+            setLocalError("");
+            void book.choosePassword(password);
+          }}
+        >
+          Save password
+        </button>
+      </div>
+      <button className="linkish" type="button" onClick={() => void book.signOut()}>
+        Back to sign in
+      </button>
+    </section>
+  );
+}
+
 export function SignupScreen() {
   const book = useBook();
   const [displayName, setDisplayName] = useState("");

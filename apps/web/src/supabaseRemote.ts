@@ -163,13 +163,20 @@ export function createSupabaseRemote() {
   const supabase = createClient(resolveSupabaseUrl(import.meta.env.VITE_SUPABASE_URL), import.meta.env.VITE_SUPABASE_ANON_KEY || "", {
     auth: { persistSession: true, autoRefreshToken: true },
   });
+  let recovery = false;
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") recovery = true;
+  });
 
   return {
     async signUp(email: string, password: string, displayName: string) {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { display_name: displayName } },
+        options: {
+          data: { display_name: displayName },
+          emailRedirectTo: window.location.origin,
+        },
       });
       if (error) throw new Error(error.message);
       if (!data.session) throw new Error("Check your email to confirm the account, then sign in.");
@@ -232,6 +239,20 @@ export function createSupabaseRemote() {
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
       if (error) throw new Error(error.message);
       return { sent: true, message: "Check your email for a link to choose a new password." };
+    },
+    async passwordRecovery() {
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const query = new URLSearchParams(window.location.search);
+      const inUrl = hash.get("type") === "recovery" || query.get("type") === "recovery";
+      await supabase.auth.getSession();
+      const pending = recovery || inUrl;
+      if (pending) window.history.replaceState(null, "", window.location.pathname);
+      return pending;
+    },
+    async updatePassword(password: string) {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw new Error(error.message);
+      recovery = false;
     },
     async updateProfile(patch: Partial<Profile>) {
       const userId = (await supabase.auth.getUser()).data.user?.id;

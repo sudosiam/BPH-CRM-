@@ -105,6 +105,12 @@ export function createHttpRemote() {
       if (!response.ok) throw new Error(data.error || "Could not reset the password.");
       return { sent: Boolean(data.sent), message: String(data.message || "Check your email.") };
     },
+    async passwordRecovery() {
+      return false;
+    },
+    async updatePassword(_password: string) {
+      throw new Error("This server cannot change the password.");
+    },
     async updateProfile(patch: Partial<Profile>) {
       const { response, data } = await request("/api/profile", {
         method: "PATCH",

@@ -9,7 +9,7 @@ import { remote, usingSupabase } from "./remote";
 import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
-type Phase = "loading" | "auth" | "signup" | "reset" | "start" | "join" | "copy" | "copy-error" | "app";
+type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
 type Screen = "today" | "leads" | "account" | "detail" | "edit";
 type SyncWord = "synced" | "syncing" | "saved";
 
@@ -95,6 +95,7 @@ type BookValue = {
   usePhoneZone: () => Promise<void>;
   exportCsv: () => void;
   requestPasswordReset: (email: string) => Promise<void>;
+  choosePassword: (password: string) => Promise<void>;
   noteActivity: (leadId: string, text: string) => void;
   applyUpdate: () => void;
   showToast: (text: string) => void;
@@ -348,6 +349,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
     (async () => {
       const saved = await db.meta.get("local");
       if (!usingSupabase) setHttpToken(saved?.token ?? "");
+      try {
+        if (await remote.passwordRecovery()) {
+          if (!cancel) setPhase("password");
+          return;
+        }
+      } catch {
+        /* Open the saved book if the reset link cannot be read. */
+      }
       const profiles = await db.profiles.toArray();
       const leadCount = await db.leads.count();
       opened = await keepSavedBook(saved, profiles, leadCount);
@@ -898,6 +907,25 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setPhase("auth");
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Could not send the reset email.");
+      }
+    },
+    async choosePassword(password) {
+      setError("");
+      try {
+        await remote.updatePassword(password);
+        const account = await remote.session();
+        if (!account) {
+          setPhase("auth");
+          return;
+        }
+        showToast("Password updated");
+        if (account.removed) {
+          await openAccount(account, false, true);
+          return;
+        }
+        await openAccount(account, false);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Could not update the password.");
       }
     },
     async recordResult(kind) {
