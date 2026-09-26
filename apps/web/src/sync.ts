@@ -106,7 +106,8 @@ export async function flushOutbox(
           continue;
         }
         if (result.ok) continue;
-        if (!result.deleted && result.lead) {
+        const ownUndo = Boolean(result.lead?.deletedAt && !lead.deletedAt && result.lead.updatedBy === lead.updatedBy);
+        if (result.lead && (!result.deleted || ownUndo)) {
           const merged = {
             ...result.lead,
             name: lead.name,
@@ -115,6 +116,8 @@ export async function flushOutbox(
             status: lead.status,
             followUpOn: lead.followUpOn,
             closedOn: lead.closedOn,
+            soldAmount: lead.soldAmount,
+            lostReason: lead.lostReason,
             deletedAt: lead.deletedAt,
             updatedBy: lead.updatedBy,
           };

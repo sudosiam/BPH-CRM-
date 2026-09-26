@@ -1024,23 +1024,36 @@ button.member-open {
 
 #toast {
   position: absolute;
-  left: 50%;
-  bottom: calc(92px + var(--safe-bottom));
-  transform: translateX(-50%);
+  left: 12px;
+  right: 12px;
+  bottom: calc(152px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   background: var(--ink);
   color: #f7f4ee;
-  padding: 10px 14px;
-  border-radius: 999px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 18px;
   font-size: 14px;
   font-weight: 700;
   z-index: 25;
-  max-width: calc(100% - 32px);
-  white-space: normal;
-  text-align: center;
-  line-height: 1.35;
+  min-height: 52px;
+  box-shadow: 0 12px 28px rgba(28, 25, 22, 0.28);
 }
 
-#toast.low { bottom: calc(20px + var(--safe-bottom)); }
+#toast.low { bottom: calc(16px + var(--safe-bottom)); }
+
+.undo-btn {
+  border: 0;
+  background: #f4fbf7;
+  color: var(--green);
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 14px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
 
 .update-banner {
   position: fixed;

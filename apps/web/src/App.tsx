@@ -226,9 +226,9 @@ function Shell() {
         </button>
       ) : null}
       {book.undo ? (
-        <div id="toast" className={tabbed ? "" : "low"}>
-          {book.undo}{" "}
-          <button className="text-btn" type="button" onClick={() => void book.undoLast()}>
+        <div id="toast" className={tabbed ? "" : "low"} role="status">
+          <span>{book.undo}</span>
+          <button className="undo-btn" type="button" onClick={() => void book.undoLast()}>
             Undo
           </button>
         </div>

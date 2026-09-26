@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadsCsv, newId, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
@@ -139,6 +139,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [updateReady, setUpdateReady] = useState(false);
   const [undo, setUndo] = useState("");
   const [undoRun, setUndoRun] = useState<(() => Promise<void>) | null>(null);
+  const undoToken = useRef(0);
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -168,11 +169,29 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }
 
   function offerUndo(label: string, run: () => Promise<void>) {
+    const token = ++undoToken.current;
     setUndo(label);
     setUndoRun(() => run);
     window.setTimeout(() => {
-      setUndo((current) => (current === label ? "" : current));
-    }, 5000);
+      if (undoToken.current !== token) return;
+      setUndo("");
+      setUndoRun(null);
+    }, 6000);
+  }
+
+  async function restoreLead(snapshot: Lead) {
+    const latest = await db.leads.get(snapshot.id);
+    const pending = await db.outbox.get(snapshot.id);
+    await queueLead(
+      {
+        ...snapshot,
+        deletedAt: null,
+        updatedBy: me?.id || snapshot.updatedBy,
+        updatedAt: new Date().toISOString(),
+      },
+      pending ? pending.baseVersion : (latest?.version ?? snapshot.version),
+    );
+    void syncNow();
   }
 
   async function tokenFor(accountUserId: string, accountEmail: string, nextOrg: Org | null, flags?: { fullSyncComplete?: boolean; cursor?: string | null }) {
@@ -775,10 +794,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       );
       const label = status === "sold" ? "Marked sold" : status === "lost" ? "Marked lost" : "Back to Lead";
       if (detailId) void logActivity(detailId, label);
-      offerUndo(label, async () => {
-        await queueLead({ ...previous, updatedAt: new Date().toISOString() }, previous.version);
-        void syncNow();
-      });
+      offerUndo(label, () => restoreLead(previous));
     },
     async setFollowUp(iso) {
       await changeLead({ followUpOn: iso });
@@ -791,10 +807,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setSheet(null);
       setStack((current) => current.slice(0, -1));
       if (current) {
-        offerUndo("Lead deleted", async () => {
-          await queueLead({ ...current, deletedAt: null, updatedAt: new Date().toISOString() }, current.version);
-          void syncNow();
-        });
+        offerUndo("Lead deleted", () => restoreLead(current));
       }
     },
     async setReminders(enabled) {
@@ -992,9 +1005,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     async undoLast() {
       const run = undoRun;
+      undoToken.current += 1;
       setUndo("");
       setUndoRun(null);
-      if (run) await run();
+      if (!run) return;
+      try {
+        await run();
+        showToast("Undone");
+      } catch {
+        showToast("Could not undo.");
+      }
     },
     setEditorDirty(dirty) {
       setEditorDirty(dirty);
