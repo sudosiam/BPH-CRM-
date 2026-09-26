@@ -55,7 +55,6 @@ export function AuthScreen() {
   const [password, setPassword] = useState("");
   return (
     <section className="auth">
-      <p className="wordmark">BPH</p>
       <h1>Sign in</h1>
       <p className="lede">Your leads stay on this phone and sync with the team.</p>
       <label className="field">
@@ -87,7 +86,6 @@ export function ResetScreen() {
   const [email, setEmail] = useState("");
   return (
     <section className="auth">
-      <p className="wordmark">BPH</p>
       <h1>Reset password</h1>
       <p className="lede">We will email a link if this address has an account.</p>
       <label className="field">
@@ -115,7 +113,6 @@ export function PasswordScreen() {
   const message = localError || book.error;
   return (
     <section className="auth">
-      <p className="wordmark">BPH</p>
       <h1>New password</h1>
       <p className="lede">Choose a password for this account.</p>
       <label className="field">
@@ -161,7 +158,6 @@ export function SignupScreen() {
   const [password, setPassword] = useState("");
   return (
     <section className="auth">
-      <p className="wordmark">BPH</p>
       <h1>Create an account</h1>
       <p className="lede">Then start a business or join one with a code.</p>
       <label className="field">
@@ -196,7 +192,6 @@ export function StartScreen() {
   if (book.remembered) {
     return (
       <section className="auth">
-        <p className="wordmark">BPH</p>
         <h1>Open {book.remembered.orgName}</h1>
         <p className="lede">This account is already in that shared book. You do not need a new code.</p>
         {book.error ? <p className="form-error">{book.error}</p> : null}
@@ -213,7 +208,6 @@ export function StartScreen() {
   }
   return (
     <section className="auth">
-      <p className="wordmark">BPH</p>
       <h1>Start a business</h1>
       <p className="lede">You become the owner of a shared book. Teammates join with a code.</p>
       <label className="field">
@@ -243,7 +237,6 @@ export function JoinScreen() {
   const [displayName, setDisplayName] = useState(book.me?.displayName || "");
   return (
     <section className="auth">
-      <p className="wordmark">BPH</p>
       <h1>Join with a code</h1>
       <p className="lede">The code is in a teammate's Settings.</p>
       <label className="field">
@@ -270,9 +263,11 @@ export function JoinScreen() {
 export function OpeningScreen() {
   return (
     <section className="boot" aria-busy="true">
-      <div className="spinner" aria-hidden="true" />
+      <div className="boot-mark" aria-hidden="true">
+        <span />
+      </div>
       <h1>Opening your book</h1>
-      <p className="lede">Checking this phone for the latest leads.</p>
+      <p className="lede">Your leads are already on this phone.</p>
     </section>
   );
 }
@@ -282,7 +277,11 @@ export function CopyScreen() {
   const failed = book.phase === "copy-error";
   return (
     <section className="boot" aria-busy={!failed}>
-      {failed ? null : <div className="spinner" aria-hidden="true" />}
+      {failed ? null : (
+        <div className="boot-mark" aria-hidden="true">
+          <span />
+        </div>
+      )}
       <h1>{failed ? "The copy didn't finish" : "Saving the book on this phone"}</h1>
       <p className="lede">
         {failed
@@ -338,7 +337,6 @@ export function TodayScreen() {
       {due.length || overdue.length ? (
         <p className="summary">
           {due.length ? <span className="today-due">{due.length} due today</span> : null}
-          {due.length && overdue.length ? " · " : null}
           {overdue.length ? <span className="overdue">{overdue.length} overdue</span> : null}
         </p>
       ) : null}
@@ -579,11 +577,11 @@ export function DetailScreen() {
         <div className="card-block">
           <p className="detail-phone">{lead.phone}</p>
           <div className="pair">
-            <a className="ghost wide" href={telHref(lead.phone)} onClick={() => book.noteActivity(lead.id, "Called")}>
+            <a className="ghost wide call-btn" href={telHref(lead.phone)} onClick={() => book.noteActivity(lead.id, "Called")}>
               Call
             </a>
             <a
-              className="ghost wide"
+              className="ghost wide wa"
               href={waHref(lead.phone, fillTemplate(book.waTemplate, lead.name))}
               target="_blank"
               rel="noopener"
