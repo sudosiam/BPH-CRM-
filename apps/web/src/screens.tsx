@@ -1073,7 +1073,9 @@ export function AccountScreen() {
         <span className="status-dot" />
         <div>
           <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
-          <p className="meta">{book.leads.length} leads on this phone</p>
+          <p className="meta">
+            {book.leads.length} {book.leads.length === 1 ? "lead" : "leads"} on this phone
+          </p>
         </div>
       </div>
       <div className="settings-foot">
