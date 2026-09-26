@@ -10,3 +10,4 @@ server/data/
 !apps/web/.env.example
 !.env.production
 .vercel
+supabase/.temp/
