@@ -269,7 +269,7 @@ export async function flushOutbox(
         }
         if (result.ok) continue;
         const ownUndo = Boolean(result.lead?.deletedAt && !lead.deletedAt && result.lead.updatedBy === lead.updatedBy);
-        if (result.lead && (!result.deleted || ownUndo)) {
+        if (ownUndo && result.lead) {
           const merged = mergeLead(result.lead, lead);
           result = await remote.pushLead(merged, result.lead.version);
           if (await settlePush(item, result)) {

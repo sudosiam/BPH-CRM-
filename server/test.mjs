@@ -183,6 +183,18 @@ test("digest stays quiet until the chosen time and when nothing is due", () => {
     ),
     { today: 1, overdue: 1 },
   );
+  assert.deepEqual(
+    digestCounts(
+      [
+        { status: "lead", followUpOn: "2026-09-25", ownerId: "a", deletedAt: null },
+        { status: "lead", followUpOn: "2026-09-24", ownerId: "b", deletedAt: null },
+        { status: "lead", followUpOn: "2026-09-25", createdBy: "a", ownerId: "b", deletedAt: null },
+      ],
+      "2026-09-25",
+      "a",
+    ),
+    { today: 2, overdue: 0 },
+  );
   assert.equal(digestLine(1, 1), "1 due today · 1 overdue");
   assert.equal(digestLine(0, 0), "");
   assert.equal(hasLocalBook({ userId: "", hasProfile: true, hasOrg: true, fullSyncComplete: true, leadCount: 1 }), false);

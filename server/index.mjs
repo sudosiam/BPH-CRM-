@@ -264,7 +264,7 @@ export function createBook(dataFile) {
       if (!profile.notifyEnabled || profile.removedAt) continue;
       const leads = state.leads.filter((lead) => lead.orgId === profile.orgId);
       const today = todayISO(profile.timezone || "UTC", now);
-      const counts = digestCounts(leads, today);
+      const counts = digestCounts(leads, today, profile.id);
       const dueCount = counts.today + counts.overdue;
       if (
         !shouldSendDigest({
@@ -341,7 +341,17 @@ export function createBook(dataFile) {
       res.write("\n");
       const stream = { res, orgId: auth.org.id };
       streams.add(stream);
-      req.on("close", () => streams.delete(stream));
+      const beat = setInterval(() => {
+        try {
+          stream.res.write(":\n\n");
+        } catch {
+          clearInterval(beat);
+        }
+      }, 25000);
+      req.on("close", () => {
+        clearInterval(beat);
+        streams.delete(stream);
+      });
       return;
     }
 

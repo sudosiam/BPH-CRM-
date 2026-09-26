@@ -131,7 +131,7 @@ async function membershipFromBook(supabase: SupabaseClient, userId: string): Pro
       displayName: String(row.display_name || "Teammate"),
       role,
       timezone: String(row.timezone || "UTC"),
-      notifyEnabled: row.notify_enabled !== false,
+      notifyEnabled: Boolean(row.notify_enabled),
       notifyMinute: Number(row.notify_minute ?? 480),
       removedAt: null,
     },

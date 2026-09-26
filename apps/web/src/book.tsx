@@ -505,11 +505,28 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (!usingSupabase) setHttpToken(saved?.token ?? "");
       opened = await keepSavedBook(saved, profileRows, leadCount);
       if (cancel || authEpoch.current !== epoch) return;
+      let copyFailed = false;
       if (opened && saved) {
         setUserId(saved.userId);
         setEmail(saved.email);
         setHeld(true);
-        setPhase("app");
+        if (!saved.fullSyncComplete && navigator.onLine) {
+          setPhase("copy");
+          try {
+            await copyBook();
+            if (cancel || authEpoch.current !== epoch) return;
+            setPhase("app");
+          } catch {
+            if (cancel || authEpoch.current !== epoch) return;
+            copyFailed = true;
+            setPhase("copy-error");
+          }
+        } else if (!saved.fullSyncComplete && leadCount === 0) {
+          copyFailed = true;
+          setPhase("copy-error");
+        } else {
+          setPhase("app");
+        }
       }
       await afterPaint();
       if (cancel || authEpoch.current !== epoch) return;
@@ -542,7 +559,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (opened && saved) {
         if (saved.userId === account.user.id && account.profile && account.org) {
           await tokenFor(account.user.id, account.user.email, account.org);
-          void syncNow();
+          if (!copyFailed) void syncNow();
         }
         return;
       }
@@ -985,6 +1002,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         if (!saved) return;
         showToast("Saved");
         setEditorDirty(false);
+        setConflictDraft(null);
         void logActivity(id, "Edited");
         setStack((current) => current.slice(0, -1));
       } else {
@@ -1016,6 +1034,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         void logActivity(lead.id, "Added");
         setDetailId(lead.id);
         setEditorDirty(false);
+        setConflictDraft(null);
         setStack((current) => [current[0] ?? "today", "detail"]);
         showToast("Lead saved");
       }

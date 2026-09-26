@@ -58,8 +58,12 @@ export function digestLine(dueToday, overdue) {
   return parts.join(" · ");
 }
 
-export function digestCounts(leads, today) {
-  const rows = leads.filter((lead) => !lead.deletedAt && lead.status === "lead" && lead.followUpOn);
+export function digestCounts(leads, today, ownerId) {
+  const rows = leads.filter((lead) => {
+    if (lead.deletedAt || lead.status !== "lead" || !lead.followUpOn) return false;
+    if (!ownerId) return true;
+    return (lead.createdBy || lead.ownerId) === ownerId;
+  });
   return {
     overdue: rows.filter((lead) => dayDiff(lead.followUpOn, today) < 0).length,
     today: rows.filter((lead) => dayDiff(lead.followUpOn, today) === 0).length,

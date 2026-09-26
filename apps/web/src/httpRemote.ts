@@ -24,9 +24,10 @@ function account(data: {
   user: Account["user"];
   profile: Profile | null;
   org: Org | null;
+  removed?: boolean;
 }): Account {
   if (data.token) token = data.token;
-  return { user: data.user, profile: data.profile, org: data.org };
+  return { user: data.user, profile: data.profile, org: data.org, removed: Boolean(data.removed) };
 }
 
 export function createHttpRemote() {

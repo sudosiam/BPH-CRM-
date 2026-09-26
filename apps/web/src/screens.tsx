@@ -324,7 +324,7 @@ export function CopyScreen() {
 
 export function TodayScreen() {
   const book = useBook();
-  const [everyone, setEveryone] = useState(true);
+  const [everyone, setEveryone] = useState(false);
   const today = todayISO(book.me?.timezone);
   const mine = (lead: Lead) => (lead.createdBy || lead.ownerId) === book.me?.id;
   const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn) && (everyone || mine(lead)));
@@ -335,6 +335,9 @@ export function TodayScreen() {
     .filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 0 && dayDiff(lead.followUpOn, today) <= 7)
     .sort(compareFollow);
   const beyond = open.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 7).length;
+  const teamDue = book.leads.some(
+    (lead) => lead.status === "lead" && lead.followUpOn && !mine(lead) && dayDiff(lead.followUpOn, today) <= 0,
+  );
   const showReminder = book.me && !book.me.notifyEnabled && !book.snoozed && overdue.length + due.length + later.length > 0;
   return (
     <>
@@ -373,6 +376,11 @@ export function TodayScreen() {
       {!overdue.length && !due.length ? (
         <div className="empty">
           <h2>Nothing overdue or due today</h2>
+          {!everyone && teamDue ? (
+            <button className="linkish" type="button" onClick={() => setEveryone(true)}>
+              The team has follow-ups due
+            </button>
+          ) : null}
         </div>
       ) : null}
       {beyond ? (
@@ -885,7 +893,12 @@ export function EditScreen() {
       </span>
       <div className="chips">
         {LEAD_SOURCES.map((source) => (
-          <button key={source} type="button" className={`chip ${draft.source === source ? "on" : ""}`} onClick={() => update({ ...draft, source })}>
+          <button
+            key={source}
+            type="button"
+            className={`chip ${draft.source === source ? "on" : ""}`}
+            onClick={() => update({ ...draft, source: draft.source === source ? null : source })}
+          >
             {source}
           </button>
         ))}
@@ -920,9 +933,10 @@ export function EditScreen() {
             <span>Date</span>
             <input type="date" value={draft.followUpOn || ""} onChange={(event) => update({ ...draft, followUpOn: event.target.value || null })} />
           </label>
+          {draft.followUpOn ? null : <p className="meta">Without a date, BPH will not remind anyone.</p>}
         </>
       ) : null}
-      {book.conflictDraft ? <p className="meta">Someone else saved this lead. Your typing is still here.</p> : null}
+      {preset ? <p className="meta">Someone else saved this lead. Your typing is still here. Save again to keep it.</p> : null}
       <label className="field">
         <span>Notes</span>
         <textarea maxLength={2000} placeholder="Optional" value={draft.notes} onChange={(event) => update({ ...draft, notes: event.target.value })} />
@@ -1112,15 +1126,14 @@ export function MemberScreen() {
     );
   }
   const mine = person.id === me.id;
-  const owned = book.leads.filter((lead) => !lead.deletedAt && lead.ownerId === person.id);
+  const owned = book.leads.filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === person.id);
   const today = todayISO(person.timezone || me.timezone);
   const open = owned.filter((lead) => lead.status === "lead").length;
   const counts = digestCounts(owned, today);
   const sold = soldThisMonth(owned, today);
   const lost = owned.filter((lead) => lead.status === "lost").length;
   const time = clock(person.notifyMinute);
-  const teamCounts = digestCounts(book.leads, todayISO(me.timezone));
-  const line = digestLine(teamCounts.today, teamCounts.overdue);
+  const line = digestLine(counts.today, counts.overdue);
   return (
     <div className="settings">
       <section className="part">
