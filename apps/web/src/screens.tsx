@@ -139,7 +139,7 @@ export function PasswordScreen() {
       <div className="panel">
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
       <label className="field">
         <span>Again</span>
@@ -151,8 +151,8 @@ export function PasswordScreen() {
           className="primary"
           type="button"
           onClick={() => {
-            if (password.length < 6) {
-              setLocalError("Use at least 6 characters.");
+            if (password.length < 8) {
+              setLocalError("Use at least 8 characters.");
               return;
             }
             if (password !== again) {
@@ -193,7 +193,7 @@ export function SignupScreen() {
       </label>
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="new-password" placeholder="At least 6 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
       {book.error ? <p className="form-error">{book.error}</p> : null}
       <div className="form-actions">
@@ -313,6 +313,7 @@ export function CopyScreen() {
       )}
       {failed ? (
         <div className="form-actions">
+          <p className="meta">The book stays put until this phone has it. BPH tries again when the connection is back.</p>
           <button className="primary" type="button" onClick={() => void book.retryCopy()}>
             Try again
           </button>
@@ -408,7 +409,7 @@ function BulkList({ ids, noun, children }: { ids: string[]; noun: string; childr
 
 export function TodayScreen() {
   const book = useBook();
-  const [everyone, setEveryone] = useState(true);
+  const [everyone, setEveryone] = useState(false);
   const today = todayISO(book.me?.timezone);
   const mine = (lead: Lead) => (lead.createdBy || lead.ownerId) === book.me?.id;
   const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn) && (everyone || mine(lead)));
@@ -419,6 +420,9 @@ export function TodayScreen() {
     .filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 0 && dayDiff(lead.followUpOn, today) <= 7)
     .sort(compareFollow);
   const beyond = open.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 7).length;
+  const teamDue = book.leads.some(
+    (lead) => lead.status === "lead" && lead.followUpOn && !mine(lead) && dayDiff(lead.followUpOn, today) <= 0,
+  );
   const showReminder = book.me && !book.me.notifyEnabled && !book.snoozed && overdue.length + due.length + later.length > 0;
   return (
     <>
@@ -450,19 +454,18 @@ export function TodayScreen() {
           </button>
         </div>
       ) : null}
-      <BulkList ids={[...overdue, ...due, ...later, ...undated].map((lead) => lead.id)} noun="lead">
-        {(select) => (
-          <>
-            <LeadSection title="Overdue" className="overdue" rows={overdue} today={today} select={select} />
-            <LeadSection title="Due today" className="today-due" rows={due} today={today} select={select} />
-            <LeadSection title="Later" className="" rows={later} today={today} select={select} />
-            <LeadSection title="Needs a date" className="" rows={undated} today={today} select={select} />
-          </>
-        )}
-      </BulkList>
+      <LeadSection title="Overdue" className="overdue" rows={overdue} today={today} />
+      <LeadSection title="Due today" className="today-due" rows={due} today={today} />
+      <LeadSection title="Later" className="" rows={later} today={today} />
+      <LeadSection title="Needs a date" className="" rows={undated} today={today} />
       {!overdue.length && !due.length ? (
         <div className="empty">
           <h2>Nothing overdue or due today</h2>
+          {!everyone && teamDue ? (
+            <button className="linkish" type="button" onClick={() => setEveryone(true)}>
+              The team has follow-ups due
+            </button>
+          ) : null}
         </div>
       ) : null}
       {beyond ? (
@@ -479,19 +482,7 @@ function compareFollow(a: Lead, b: Lead) {
   return a.name.localeCompare(b.name);
 }
 
-function LeadSection({
-  title,
-  className,
-  rows,
-  today,
-  select,
-}: {
-  title: string;
-  className: string;
-  rows: Lead[];
-  today: string;
-  select: BulkSelect;
-}) {
+function LeadSection({ title, className, rows, today }: { title: string; className: string; rows: Lead[]; today: string }) {
   const book = useBook();
   if (!rows.length) return null;
   return (
@@ -501,16 +492,9 @@ function LeadSection({
         {rows.map((lead) => {
           const due = dueMeta(lead.followUpOn, today);
           const call = telHref(lead.phone);
-          const picked = select.on && select.has(lead.id);
           return (
-            <div className={`row ${picked ? "picked" : ""}`} key={lead.id}>
-              <button
-                className="row-open"
-                type="button"
-                aria-pressed={select.on ? picked : undefined}
-                onClick={() => (select.on ? select.toggle(lead.id) : book.openLead(lead.id))}
-              >
-                {select.on ? <span className={`pick ${picked ? "on" : ""}`} aria-hidden="true" /> : null}
+            <div className="row" key={lead.id}>
+              <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
                 <span className="avatar" style={{ background: tone(lead.name) }}>
                   {initials(lead.name)}
                 </span>
@@ -589,9 +573,7 @@ export function LeadsScreen() {
           Mine
         </button>
       </div>
-      <BulkList key={book.segment} ids={rows.map((lead) => lead.id)} noun="lead">
-        {(select) =>
-          rows.length ? (
+      {rows.length ? (
         <div className="group">
           {rows.map((lead) => {
             const sub =
@@ -600,16 +582,9 @@ export function LeadsScreen() {
                 : lead.status === "lost"
                   ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
                   : { ...dueMeta(lead.followUpOn, today), amount: null };
-            const picked = select.on && select.has(lead.id);
             return (
-              <div className={`row ${picked ? "picked" : ""}`} key={lead.id}>
-                <button
-                  className="row-open"
-                  type="button"
-                  aria-pressed={select.on ? picked : undefined}
-                  onClick={() => (select.on ? select.toggle(lead.id) : book.openLead(lead.id))}
-                >
-                  {select.on ? <span className={`pick ${picked ? "on" : ""}`} aria-hidden="true" /> : null}
+              <div className="row" key={lead.id}>
+                <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
                   <span className="avatar" style={{ background: tone(lead.name) }}>
                     {initials(lead.name)}
                   </span>
@@ -631,13 +606,11 @@ export function LeadsScreen() {
             );
           })}
         </div>
-          ) : (
+      ) : (
         <div className="empty">
           <h2>{emptyTitle}</h2>
         </div>
-          )
-        }
-      </BulkList>
+      )}
     </>
   );
 }
@@ -1016,7 +989,12 @@ export function EditScreen() {
       </span>
       <div className="chips">
         {LEAD_SOURCES.map((source) => (
-          <button key={source} type="button" className={`chip ${draft.source === source ? "on" : ""}`} onClick={() => update({ ...draft, source })}>
+          <button
+            key={source}
+            type="button"
+            className={`chip ${draft.source === source ? "on" : ""}`}
+            onClick={() => update({ ...draft, source: draft.source === source ? null : source })}
+          >
             {source}
           </button>
         ))}
@@ -1051,9 +1029,10 @@ export function EditScreen() {
             <span>Date</span>
             <input type="date" value={draft.followUpOn || ""} onChange={(event) => update({ ...draft, followUpOn: event.target.value || null })} />
           </label>
+          {draft.followUpOn ? null : <p className="meta">Without a date, BPH will not remind anyone.</p>}
         </>
       ) : null}
-      {book.conflictDraft ? <p className="meta">Someone else saved this lead. Your typing is still here.</p> : null}
+      {preset ? <p className="meta">Someone else saved this lead. Your typing is still here. Save again to keep it.</p> : null}
       <label className="field">
         <span>Notes</span>
         <textarea maxLength={2000} placeholder="Optional" value={draft.notes} onChange={(event) => update({ ...draft, notes: event.target.value })} />
@@ -1075,6 +1054,63 @@ export function EditScreen() {
 }
 
 const REMINDER_SHORTCUTS = [420, 480, 540, 1080];
+
+function phoneNeedsHomeScreen() {
+  if (typeof navigator === "undefined") return false;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  return ios && !standalone;
+}
+
+function PasswordEditor({
+  requireCurrent,
+  onSave,
+}: {
+  requireCurrent?: boolean;
+  onSave: (current: string, next: string) => Promise<void>;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  return (
+    <div className="card-block">
+      {requireCurrent ? (
+        <label className="field">
+          <span>Current password</span>
+          <input type="password" autoComplete="current-password" value={current} onChange={(event) => setCurrent(event.target.value)} />
+        </label>
+      ) : null}
+      <label className="field">
+        <span>New password</span>
+        <input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={next} onChange={(event) => setNext(event.target.value)} />
+      </label>
+      {error ? <p className="form-error">{error}</p> : null}
+      <button
+        className="ghost wide"
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          if (next.length < 8) {
+            setError("Use at least 8 characters.");
+            return;
+          }
+          setError("");
+          setPending(true);
+          void onSave(current, next)
+            .then(() => {
+              setCurrent("");
+              setNext("");
+            })
+            .catch((reason) => setError(reason instanceof Error ? reason.message : "Could not update the password."))
+            .finally(() => setPending(false));
+        }}
+      >
+        {pending ? "Saving…" : "Save password"}
+      </button>
+    </div>
+  );
+}
 
 function clock(minute: number) {
   const safe = ((minute % 1440) + 1440) % 1440;
@@ -1190,7 +1226,9 @@ export function AccountScreen() {
         <span className="status-dot" />
         <div>
           <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
-          <p className="meta">{book.leads.length} leads on this phone</p>
+          <p className="meta">
+            {book.leads.length} {book.leads.length === 1 ? "lead" : "leads"} on this phone
+          </p>
         </div>
       </div>
       <div className="settings-foot">
@@ -1243,15 +1281,15 @@ export function MemberScreen() {
     );
   }
   const mine = person.id === me.id;
-  const owned = book.leads.filter((lead) => !lead.deletedAt && lead.ownerId === person.id);
+  const owned = book.leads.filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === person.id);
   const today = todayISO(person.timezone || me.timezone);
   const open = owned.filter((lead) => lead.status === "lead").length;
   const counts = digestCounts(owned, today);
   const sold = soldThisMonth(owned, today);
   const lost = owned.filter((lead) => lead.status === "lost").length;
   const time = clock(person.notifyMinute);
-  const teamCounts = digestCounts(book.leads, todayISO(me.timezone));
-  const line = digestLine(teamCounts.today, teamCounts.overdue);
+  const alertCounts = digestCounts(book.leads, today);
+  const line = digestLine(alertCounts.today, alertCounts.overdue);
   return (
     <div className="settings">
       <section className="part">
@@ -1348,9 +1386,13 @@ export function MemberScreen() {
                 <p className="push-title">Follow-ups</p>
                 <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
               </div>
+              <p className="meta">Everyone with alerts on gets this at the time they chose. It counts every open follow-up in the book.</p>
               <button className="ghost wide" type="button" onClick={() => void book.sendTestAlert()}>
                 Send a test alert
               </button>
+              {phoneNeedsHomeScreen() ? (
+                <p className="meta">On iPhone, add BPH to the Home Screen. Alerts while the app is closed arrive only there, on iOS 16.4 or later. Today is the list either way.</p>
+              ) : null}
             </>
           ) : (
             <>
@@ -1360,6 +1402,16 @@ export function MemberScreen() {
           )}
         </div>
       </section>
+      {mine || me.role === "owner" ? (
+        <section className="part">
+          <p className="part-label">Password</p>
+          {mine ? (
+            <PasswordEditor requireCurrent onSave={(current, next) => book.changePassword(current, next)} />
+          ) : (
+            <PasswordEditor onSave={(_current, next) => book.setMemberPassword(person.id, next)} />
+          )}
+        </section>
+      ) : null}
       {me.role === "owner" && !mine ? (
         <section className="part">
           <p className="part-label">Owner</p>

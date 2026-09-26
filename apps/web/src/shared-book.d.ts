@@ -7,8 +7,9 @@ declare module "@shared/book.mjs" {
   export function localMinutes(timeZone: string, now?: Date): number;
   export function digestLine(dueToday: number, overdue: number): string;
   export function digestCounts(
-    leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null }>,
+    leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null; ownerId?: string; createdBy?: string }>,
     today: string,
+    ownerId?: string,
   ): { overdue: number; today: number };
   export function shouldSendDigest(input: {
     notifyEnabled: boolean;
@@ -46,6 +47,11 @@ declare module "@shared/book.mjs" {
       updatedAt?: string;
     }>,
   ): string;
+  export function mergeLeadFields(
+    base: Record<string, unknown> | null | undefined,
+    local: Record<string, unknown> | null | undefined,
+    server: Record<string, unknown> | null | undefined,
+  ): { lead: Record<string, unknown>; conflicts: string[] };
   export function mergeLead<T extends Record<string, unknown>>(server: T, local: T): T;
   export function safeTimeZone(timeZone?: string): string;
   export function hasLocalBook(input: {

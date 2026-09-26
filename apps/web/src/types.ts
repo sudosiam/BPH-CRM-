@@ -61,10 +61,28 @@ export type PushResult =
   | { ok: true; lead: Lead }
   | { ok: false; lead: Lead | null; deleted: boolean };
 
+export type LeadBase = {
+  name: string;
+  phone: string;
+  notes: string;
+  status: LeadStatus;
+  followUpOn: string | null;
+  closedOn: string | null;
+  soldAmount: number | null;
+  lostReason: string | null;
+  source: string | null;
+  tags: string[];
+  lastContactAt: string | null;
+  contactCount: number;
+  history: string;
+  deletedAt: string | null;
+};
+
 export type OutboxItem = {
   id: string;
   baseVersion: number | null;
   rev: number;
+  base?: LeadBase | null;
 };
 
 export type Meta = {

@@ -231,7 +231,7 @@ function Shell() {
         {book.phase === "app" && book.screen === "member" ? <MemberScreen /> : null}
         {book.phase === "app" && book.screen === "message" ? <MessageScreen /> : null}
         {book.phase === "app" && book.screen === "detail" ? <DetailScreen /> : null}
-        {book.phase === "app" && book.screen === "edit" ? <EditScreen /> : null}
+        {book.phase === "app" && book.screen === "edit" ? <EditScreen key={book.detailId ?? "new"} /> : null}
         </div>
       </main>
       {tabbed ? (

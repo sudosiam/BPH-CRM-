@@ -58,8 +58,12 @@ export function digestLine(dueToday, overdue) {
   return parts.join(" · ");
 }
 
-export function digestCounts(leads, today) {
-  const rows = leads.filter((lead) => !lead.deletedAt && lead.status === "lead" && lead.followUpOn);
+export function digestCounts(leads, today, ownerId) {
+  const rows = leads.filter((lead) => {
+    if (lead.deletedAt || lead.status !== "lead" || !lead.followUpOn) return false;
+    if (!ownerId) return true;
+    return (lead.createdBy || lead.ownerId) === ownerId;
+  });
   return {
     overdue: rows.filter((lead) => dayDiff(lead.followUpOn, today) < 0).length,
     today: rows.filter((lead) => dayDiff(lead.followUpOn, today) === 0).length,
@@ -199,6 +203,54 @@ export const CUSTOMER_TAGS = ["Scooty", "Lithium battery", "Acid battery", "Part
 export function normalizeTags(value) {
   const picked = new Set(Array.isArray(value) ? value : []);
   return CUSTOMER_TAGS.filter((tag) => picked.has(tag));
+}
+
+const MERGE_FIELDS = [
+  "name",
+  "phone",
+  "notes",
+  "status",
+  "followUpOn",
+  "closedOn",
+  "soldAmount",
+  "lostReason",
+  "source",
+  "tags",
+  "lastContactAt",
+  "contactCount",
+  "history",
+  "deletedAt",
+];
+
+function mergeValue(field, value) {
+  if (field === "tags") return normalizeTags(value).join("\0");
+  if (field === "soldAmount") {
+    if (value == null || value === "") return "";
+    const amount = Number(value);
+    return Number.isFinite(amount) ? String(amount) : "";
+  }
+  if (field === "contactCount") return String(Number(value) || 0);
+  if (value == null) return "";
+  return String(value);
+}
+
+/** Keeps a field this phone changed when the server copy of that field is unchanged. Same-field edits stay on the server and are listed in conflicts. */
+export function mergeLeadFields(base, local, server) {
+  const lead = { ...server };
+  const conflicts = [];
+  if (!base || !local || !server) return { lead, conflicts: ["lead"] };
+  for (const field of MERGE_FIELDS) {
+    const before = mergeValue(field, base[field]);
+    const mine = mergeValue(field, local[field]);
+    const theirs = mergeValue(field, server[field]);
+    if (mine === theirs || mine === before) continue;
+    if (theirs === before) {
+      lead[field] = field === "tags" ? normalizeTags(local.tags) : local[field];
+      continue;
+    }
+    conflicts.push(field);
+  }
+  return { lead, conflicts };
 }
 
 export function mergeLead(server, local) {

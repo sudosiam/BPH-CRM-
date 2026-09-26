@@ -4,9 +4,9 @@ import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpRes
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
-import { enableNotifications, maybeLocalDigest, showTestNotification, syncBadge } from "./notify";
+import { enableNotifications, maybeLocalDigest, showTestNotification, subscribeToPush, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
-import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, runFullSync, runIncremental, saveMeta } from "./sync";
+import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, restoreLeadNow, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
@@ -113,6 +113,8 @@ type BookValue = {
   exportCsv: () => void;
   requestPasswordReset: (email: string) => Promise<void>;
   choosePassword: (password: string) => Promise<void>;
+  changePassword: (currentPassword: string, password: string) => Promise<void>;
+  setMemberPassword: (memberId: string, password: string) => Promise<void>;
   noteActivity: (leadId: string, text: string) => void;
   applyUpdate: () => void;
   showToast: (text: string) => void;
@@ -215,6 +217,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const hideFlushAt = useRef(0);
   const authEpoch = useRef(0);
   const signedOut = useRef(false);
+  const retryCopyRef = useRef<() => Promise<void>>(async () => {});
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -265,27 +268,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }
 
   async function restoreLead(snapshot: Lead) {
-    await patchLeadNow(
-      snapshot.id,
-      () => ({
-        name: snapshot.name,
-        phone: snapshot.phone,
-        notes: snapshot.notes,
-        status: snapshot.status,
-        followUpOn: snapshot.followUpOn,
-        closedOn: snapshot.closedOn,
-        ownerId: snapshot.ownerId,
-        soldAmount: snapshot.soldAmount,
-        lostReason: snapshot.lostReason,
-        source: snapshot.source,
-        tags: snapshot.tags,
-        lastContactAt: snapshot.lastContactAt,
-        contactCount: snapshot.contactCount,
-        history: snapshot.history,
-        deletedAt: null,
-      }),
-      me?.id || snapshot.updatedBy,
-    );
+    await restoreLeadNow(snapshot, me?.id || snapshot.updatedBy);
     scheduleSync();
   }
 
@@ -506,11 +489,28 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (!usingSupabase) setHttpToken(saved?.token ?? "");
       opened = await keepSavedBook(saved, profileRows, leadCount);
       if (cancel || authEpoch.current !== epoch) return;
+      let copyFailed = false;
       if (opened && saved) {
         setUserId(saved.userId);
         setEmail(saved.email);
         setHeld(true);
-        setPhase("app");
+        if (!saved.fullSyncComplete && navigator.onLine) {
+          setPhase("copy");
+          try {
+            await copyBook();
+            if (cancel || authEpoch.current !== epoch) return;
+            setPhase("app");
+          } catch {
+            if (cancel || authEpoch.current !== epoch) return;
+            copyFailed = true;
+            setPhase("copy-error");
+          }
+        } else if (!saved.fullSyncComplete && leadCount === 0) {
+          copyFailed = true;
+          setPhase("copy-error");
+        } else {
+          setPhase("app");
+        }
       }
       await afterPaint();
       if (cancel || authEpoch.current !== epoch) return;
@@ -543,7 +543,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (opened && saved) {
         if (saved.userId === account.user.id && account.profile && account.org) {
           await tokenFor(account.user.id, account.user.email, account.org);
-          void syncNow();
+          if (!copyFailed) void syncNow();
         }
         return;
       }
@@ -654,6 +654,29 @@ export function BookProvider({ children }: { children: ReactNode }) {
       window.clearInterval(poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "copy-error") return;
+    const run = () => {
+      if (navigator.onLine) void retryCopyRef.current();
+    };
+    window.addEventListener("online", run);
+    const timer = window.setInterval(run, 5000);
+    return () => {
+      window.removeEventListener("online", run);
+      window.clearInterval(timer);
+    };
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "app") return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    void subscribeToPush()
+      .then((ok) => {
+        if (ok) setPushActive(true);
+      })
+      .catch(() => undefined);
   }, [phase]);
 
   useEffect(() => {
@@ -986,6 +1009,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         if (!saved) return;
         showToast("Saved");
         setEditorDirty(false);
+        setConflictDraft(null);
         void logActivity(id, "Edited");
         setStack((current) => current.slice(0, -1));
       } else {
@@ -1017,6 +1041,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         void logActivity(lead.id, "Added");
         setDetailId(lead.id);
         setEditorDirty(false);
+        setConflictDraft(null);
         setStack((current) => [current[0] ?? "today", "detail"]);
         showToast("Lead saved");
       }
@@ -1242,6 +1267,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setError(reason instanceof Error ? reason.message : "Could not send the reset email.");
       }
     },
+    async changePassword(currentPassword, password) {
+      await remote.changePassword(currentPassword, password);
+      showToast("Password updated");
+    },
+    async setMemberPassword(memberId, password) {
+      await remote.setMemberPassword(memberId, password);
+      showToast("Password set. Their other phones need to sign in again.");
+    },
     async choosePassword(password) {
       setError("");
       try {
@@ -1425,6 +1458,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     });
   }
 
+  retryCopyRef.current = value.retryCopy;
   return <BookContext.Provider value={value}>{children}</BookContext.Provider>;
 }
 

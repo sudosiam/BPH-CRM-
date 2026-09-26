@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
-import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync, copyFileSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync, copyFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import webpush from "web-push";
@@ -43,6 +43,7 @@ export function createBook(dataFile) {
     leads: [],
     subscriptions: [],
     digests: {},
+    resets: [],
     vapid: null,
   };
   let state = fresh;
@@ -58,27 +59,152 @@ export function createBook(dataFile) {
   state = { ...fresh, ...state };
   if (!state.digests) state.digests = {};
   if (!state.subscriptions) state.subscriptions = [];
+  if (!state.resets) state.resets = [];
+  let lastPersisted = JSON.stringify(state);
+  const lockPath = `${dataFile}.lock`;
   if (!state.vapid) {
-    state.vapid = webpush.generateVAPIDKeys();
-    persist();
+    const fd = acquireLockSync();
+    try {
+      reload();
+      if (!state.vapid) {
+        state.vapid = webpush.generateVAPIDKeys();
+        persist();
+      }
+    } finally {
+      releaseLock(fd);
+    }
   }
   webpush.setVapidDetails("mailto:reminders@bph.local", state.vapid.publicKey, state.vapid.privateKey);
 
   let chain = Promise.resolve();
-  function mutate(fn) {
-    const run = chain.then(fn, fn);
+  let inLock = false;
+
+  function pause(ms) {
+    const view = new Int32Array(new SharedArrayBuffer(4));
+    try {
+      Atomics.wait(view, 0, 0, ms);
+    } catch {
+      const end = Date.now() + ms;
+      while (Date.now() < end) {
+        /* A short wait so two servers can share one book file. */
+      }
+    }
+  }
+
+  function tryLock() {
+    try {
+      const fd = openSync(lockPath, "wx");
+      try {
+        writeSync(fd, String(process.pid));
+      } catch {
+        /* The file itself is the lock. */
+      }
+      return fd;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > 20000) unlinkSync(lockPath);
+      } catch {
+        /* The other process released it, or still holds it. */
+      }
+      return null;
+    }
+  }
+
+  function acquireLockSync() {
+    const deadline = Date.now() + 8000;
+    for (;;) {
+      const fd = tryLock();
+      if (fd) return fd;
+      if (Date.now() > deadline) throw Object.assign(new Error("The book is busy. Try again."), { status: 503 });
+      pause(20);
+    }
+  }
+
+  async function acquireLock() {
+    const deadline = Date.now() + 8000;
+    for (;;) {
+      const fd = tryLock();
+      if (fd) return fd;
+      if (Date.now() > deadline) throw Object.assign(new Error("The book is busy. Try again."), { status: 503 });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  function releaseLock(fd) {
+    try {
+      closeSync(fd);
+    } catch {
+      /* The lock file is removed next. */
+    }
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      /* Already released. */
+    }
+  }
+
+  function reload() {
+    let disk = null;
+    try {
+      disk = readBookFile(dataFile);
+    } catch {
+      disk = null;
+    }
+    if (!disk) {
+      try {
+        disk = readBookFile(`${dataFile}.bak`) || readBookFile(`${dataFile}.tmp`);
+      } catch {
+        disk = null;
+      }
+    }
+    if (!disk) return;
+    state.users = disk.users || [];
+    state.sessions = disk.sessions || [];
+    state.orgs = disk.orgs || [];
+    state.profiles = disk.profiles || [];
+    state.leads = disk.leads || [];
+    state.subscriptions = disk.subscriptions || [];
+    state.digests = disk.digests || {};
+    state.resets = disk.resets || [];
+    if (disk.vapid) state.vapid = disk.vapid;
+    lastPersisted = JSON.stringify(state);
+  }
+
+  function runLocked(fn) {
+    if (inLock) return Promise.resolve().then(fn);
+    const run = chain.then(async () => {
+      const fd = await acquireLock();
+      inLock = true;
+      try {
+        reload();
+        const result = await fn();
+        persist();
+        return result;
+      } finally {
+        inLock = false;
+        releaseLock(fd);
+      }
+    });
     chain = run.then(
       () => {},
       () => {},
     );
     return run;
   }
+
+  function mutate(fn) {
+    if (inLock) return Promise.resolve().then(fn);
+    return runLocked(fn);
+  }
   function persist() {
+    const payload = JSON.stringify(state);
+    if (payload === lastPersisted) return;
     const tmp = `${dataFile}.tmp`;
     const bak = `${dataFile}.bak`;
     const fd = openSync(tmp, "w");
     try {
-      writeSync(fd, JSON.stringify(state));
+      writeSync(fd, payload);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -91,6 +217,7 @@ export function createBook(dataFile) {
       }
     }
     renameSync(tmp, dataFile);
+    lastPersisted = payload;
   }
 
   const streams = new Set();
@@ -301,47 +428,98 @@ export function createBook(dataFile) {
     }
   }
 
+  function hashToken(token) {
+    return createHash("sha256").update(String(token)).digest("hex");
+  }
+
+  function publicOrigin(req) {
+    const configured = String(process.env.BPH_PUBLIC_URL || "").replace(/\/$/, "");
+    if (configured) return configured;
+    const host = req.headers.host || "localhost";
+    const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
+    return `${proto}://${host}`;
+  }
+
+  async function sendResetEmail(to, link) {
+    const host = process.env.BPH_SMTP_HOST;
+    if (!host) return false;
+    const nodemailer = await import("nodemailer");
+    const transport = nodemailer.createTransport({
+      host,
+      port: Number(process.env.BPH_SMTP_PORT || 587),
+      secure: process.env.BPH_SMTP_SECURE === "1",
+      auth: process.env.BPH_SMTP_USER ? { user: process.env.BPH_SMTP_USER, pass: process.env.BPH_SMTP_PASS || "" } : undefined,
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000,
+    });
+    await transport.sendMail({
+      from: process.env.BPH_SMTP_FROM || "BPH <reminders@bph.local>",
+      to,
+      subject: "Reset your BPH password",
+      text: `Choose a new password:\n${link}\n\nThis link stops working in 30 minutes.`,
+    });
+    return true;
+  }
+
+  async function writePassword(user, password, keepToken) {
+    const next = await hashPassword(password);
+    user.salt = next.salt;
+    user.hash = next.hash;
+    state.sessions = state.sessions.filter((item) => item.userId !== user.id || item.token === keepToken);
+    state.resets = (state.resets || []).filter((item) => item.userId !== user.id);
+  }
+
   async function handler(req, res) {
     const url = new URL(req.url || "/", "http://localhost");
-    if (url.pathname.startsWith("/api/")) {
-      try {
-        await handleApi(req, res, url);
-      } catch (error) {
-        if (res.headersSent) return;
-        if (error instanceof SyntaxError) {
-          send(res, 400, { error: "That request was not valid JSON." });
-          return;
-        }
-        console.error(error);
-        send(res, error.status || 500, { error: error.status ? error.message : "Something went wrong." });
-      }
+    if (!url.pathname.startsWith("/api/")) {
+      serveStatic(req, res, url);
       return;
     }
-    serveStatic(req, res, url);
+    try {
+      if (req.method === "GET" && url.pathname === "/api/sync/stream") {
+        const auth = await runLocked(() => authFrom(req));
+        const denied = requireMember(auth);
+        if (denied) {
+          send(res, denied.status, denied.body);
+          return;
+        }
+        res.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        });
+        res.write("\n");
+        const stream = { res, orgId: auth.org.id };
+        streams.add(stream);
+        const beat = setInterval(() => {
+          try {
+            stream.res.write(":\n\n");
+          } catch {
+            clearInterval(beat);
+          }
+        }, 25000);
+        req.on("close", () => {
+          clearInterval(beat);
+          streams.delete(stream);
+        });
+        return;
+      }
+      await runLocked(() => handleApi(req, res, url));
+    } catch (error) {
+      if (res.headersSent) return;
+      if (error instanceof SyntaxError) {
+        send(res, 400, { error: "That request was not valid JSON." });
+        return;
+      }
+      console.error(error);
+      send(res, error.status || 500, { error: error.status ? error.message : "Something went wrong." });
+    }
   }
 
   async function handleApi(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/push/vapid") {
       send(res, 200, { publicKey: state.vapid.publicKey });
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/sync/stream") {
-      const auth = authFrom(req);
-      const denied = requireMember(auth);
-      if (denied) {
-        send(res, denied.status, denied.body);
-        return;
-      }
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-      });
-      res.write("\n");
-      const stream = { res, orgId: auth.org.id };
-      streams.add(stream);
-      req.on("close", () => streams.delete(stream));
       return;
     }
 
@@ -403,12 +581,72 @@ export function createBook(dataFile) {
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/reset") {
-      await readJson(req);
-      send(res, 200, { ok: true, sent: false, message: "This server does not send email. The person who runs it can set a new password." });
+      const body = await readJson(req);
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const user = state.users.find((item) => item.email === email);
+      if (!process.env.BPH_SMTP_HOST) {
+        return send(res, 200, {
+          ok: true,
+          sent: false,
+          message: "This server has no email. Ask the owner to set a new password for you.",
+        });
+      }
+      if (user) {
+        const token = randomBytes(24).toString("hex");
+        const expiresAt = Date.now() + 30 * 60 * 1000;
+        await mutate(async () => {
+          state.resets = (state.resets || []).filter((item) => item.expiresAt > Date.now() && item.userId !== user.id);
+          state.resets.push({ tokenHash: hashToken(token), userId: user.id, expiresAt });
+          persist();
+        });
+        try {
+          await sendResetEmail(email, `${publicOrigin(req)}/crm/?reset=${token}`);
+        } catch (error) {
+          console.error(error);
+          return send(res, 200, {
+            ok: true,
+            sent: false,
+            message: "The email did not send. Ask the owner to set a new password for you.",
+          });
+        }
+      }
+      send(res, 200, { ok: true, sent: true, message: "Check your email for a link to choose a new password." });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/reset/confirm") {
+      const body = await readJson(req);
+      const password = String(body.password ?? "");
+      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
+      const row = (state.resets || []).find((item) => item.tokenHash === hashToken(body.token) && item.expiresAt > Date.now());
+      const user = row ? state.users.find((item) => item.id === row.userId) : null;
+      if (!user) return send(res, 400, { error: "That link has expired. Ask for a new one." });
+      const token = randomBytes(24).toString("hex");
+      await mutate(async () => {
+        await writePassword(user, password, token);
+        state.sessions.push({ token, userId: user.id, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
+        persist();
+      });
+      send(res, 200, accountBody(sessionUser(token), token));
       return;
     }
 
     if (!auth) return send(res, 401, { error: "Sign in again." });
+
+    if (req.method === "POST" && url.pathname === "/api/auth/password") {
+      const body = await readJson(req);
+      const password = String(body.password ?? "");
+      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
+      if (!(await verifyPassword(String(body.currentPassword ?? ""), auth.user))) {
+        return send(res, 400, { error: "The current password is wrong." });
+      }
+      await mutate(async () => {
+        await writePassword(auth.user, password, auth.session.token);
+        persist();
+      });
+      send(res, 200, { ok: true });
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/orgs") {
       const current = state.profiles.find((item) => item.id === auth.user.id);
@@ -518,6 +756,24 @@ export function createBook(dataFile) {
         persist();
       });
       send(res, 200, { waTemplate: template });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/orgs/members/password") {
+      if (auth.profile.role !== "owner") return send(res, 403, { error: "Only the owner can set a password." });
+      const body = await readJson(req);
+      const password = String(body.password ?? "");
+      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
+      if (body.memberId === auth.user.id) return send(res, 400, { error: "Change your own password from your profile." });
+      const member = state.profiles.find((item) => item.id === body.memberId && item.orgId === auth.org.id && !item.removedAt);
+      const user = state.users.find((item) => item.id === body.memberId);
+      if (!member || !user) return send(res, 404, { error: "That person is not on the team." });
+      await mutate(async () => {
+        await writePassword(user, password, null);
+        persist();
+      });
+      broadcast(auth.org.id);
+      send(res, 200, { ok: true });
       return;
     }
 
@@ -639,7 +895,9 @@ export function createBook(dataFile) {
         if (body.baseVersion == null) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: Boolean(existing.deletedAt) } };
         }
-        if (existing.deletedAt) return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+        if (existing.deletedAt && (input.deletedAt || body.baseVersion !== existing.version)) {
+          return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+        }
         if (existing.version !== body.baseVersion) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: false } };
         }
@@ -653,7 +911,7 @@ export function createBook(dataFile) {
         existing.updatedBy = auth.user.id;
         existing.version += 1;
         existing.updatedAt = now;
-        if (input.deletedAt) existing.deletedAt = now;
+        existing.deletedAt = input.deletedAt ? now : null;
         persist();
         return { status: 200, body: { lead: publicLead(existing) }, orgId: auth.org.id };
       });
@@ -738,7 +996,7 @@ export function createBook(dataFile) {
   }
 
   const timer = setInterval(() => {
-    sendDueDigests().catch((error) => console.error(error));
+    runLocked(() => sendDueDigests()).catch((error) => console.error(error));
   }, 30_000);
   timer.unref?.();
   const pruneTimer = setInterval(() => {

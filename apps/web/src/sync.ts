@@ -1,7 +1,26 @@
-import { mergeLead, pullSince } from "@shared/book.mjs";
+import { mergeLead, mergeLeadFields, normalizeTags, pullSince } from "@shared/book.mjs";
 import { db } from "./db";
 import { remote } from "./remote";
-import type { Lead, Org, Profile } from "./types";
+import type { Lead, LeadBase, Org, Profile } from "./types";
+
+function leadBase(lead: Lead): LeadBase {
+  return {
+    name: lead.name,
+    phone: lead.phone,
+    notes: lead.notes,
+    status: lead.status,
+    followUpOn: lead.followUpOn,
+    closedOn: lead.closedOn,
+    soldAmount: lead.soldAmount,
+    lostReason: lead.lostReason,
+    source: lead.source,
+    tags: normalizeTags(lead.tags),
+    lastContactAt: lead.lastContactAt,
+    contactCount: Number(lead.contactCount) || 0,
+    history: lead.history || "",
+    deletedAt: lead.deletedAt,
+  };
+}
 
 export type ProfilePatch = {
   timezone?: string;
@@ -148,13 +167,14 @@ function writeStrict<T>(
   });
 }
 
-export function queueLead(next: Lead, baseVersion: number | null) {
+export function queueLead(next: Lead, baseVersion: number | null, before?: Lead | null) {
   return writeStrict([db.leads, db.outbox], async () => {
     const existing = await db.outbox.get(next.id);
     await db.leads.put(next);
     await db.outbox.put({
       id: next.id,
       baseVersion: existing ? existing.baseVersion : baseVersion,
+      base: existing?.base ?? (before ? leadBase(before) : null),
       rev: (existing?.rev ?? 0) + 1,
     });
   });
@@ -183,10 +203,11 @@ export function commitSoldDurable(id: string, amount: number | null, actorId: st
     leads.put({ ...current, soldAmount: amount, updatedBy: actorId, updatedAt: new Date().toISOString() });
     const queued = outbox.get(id);
     queued.onsuccess = () => {
-      const existing = queued.result as { baseVersion: number | null; rev?: number } | undefined;
+      const existing = queued.result as { baseVersion: number | null; rev?: number; base?: LeadBase | null } | undefined;
       outbox.put({
         id,
         baseVersion: existing ? existing.baseVersion : current.version,
+        base: existing?.base ?? leadBase(current),
         rev: (existing?.rev ?? 0) + 1,
       });
     };
@@ -211,6 +232,30 @@ export function patchLeadNow(id: string, revise: (current: Lead) => Partial<Lead
     await db.outbox.put({
       id,
       baseVersion: existing ? existing.baseVersion : current.version,
+      base: existing?.base ?? leadBase(current),
+      rev: (existing?.rev ?? 0) + 1,
+    });
+    return true;
+  });
+}
+
+/** Puts a deleted lead back, even after sync has removed the local row. */
+export function restoreLeadNow(snapshot: Lead, actorId: string) {
+  return writeStrict([db.leads, db.outbox], async () => {
+    const current = await db.leads.get(snapshot.id);
+    const existing = await db.outbox.get(snapshot.id);
+    const next: Lead = {
+      ...snapshot,
+      deletedAt: null,
+      updatedBy: actorId,
+      updatedAt: new Date().toISOString(),
+      version: current?.version ?? snapshot.version,
+    };
+    await db.leads.put(next);
+    await db.outbox.put({
+      id: snapshot.id,
+      baseVersion: existing ? existing.baseVersion : (current?.version ?? snapshot.version),
+      base: existing?.base ?? leadBase(current ?? snapshot),
       rev: (existing?.rev ?? 0) + 1,
     });
     return true;
@@ -268,8 +313,18 @@ export async function flushOutbox(
           continue;
         }
         if (result.ok) continue;
+        if (result.lead && !result.deleted && item.base) {
+          const merged = mergeLeadFields(item.base, lead, result.lead);
+          if (merged.conflicts.length === 0) {
+            result = await remote.pushLead(merged.lead as Lead, result.lead.version);
+            if (await settlePush(item, result)) {
+              progressed = true;
+              continue;
+            }
+          }
+        }
         const ownUndo = Boolean(result.lead?.deletedAt && !lead.deletedAt && result.lead.updatedBy === lead.updatedBy);
-        if (result.lead && (!result.deleted || ownUndo)) {
+        if (ownUndo && result.lead) {
           const merged = mergeLead(result.lead, lead);
           result = await remote.pushLead(merged, result.lead.version);
           if (await settlePush(item, result)) {
@@ -281,6 +336,10 @@ export async function flushOutbox(
         if (!kept || kept.deletedAt || (!result.ok && result.deleted)) {
           await db.leads.delete(item.id);
           onNotice("This lead was deleted.");
+        } else if (lead.deletedAt && !kept.deletedAt) {
+          await db.leads.put(kept);
+          const actor = (await db.profiles.get(kept.updatedBy))?.displayName ?? "someone";
+          onNotice(`${actor} updated this lead, so it was not deleted.`);
         } else {
           await db.leads.put(kept);
           onConflict?.(lead, kept);

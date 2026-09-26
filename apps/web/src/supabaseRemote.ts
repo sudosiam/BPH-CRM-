@@ -131,7 +131,7 @@ async function membershipFromBook(supabase: SupabaseClient, userId: string): Pro
       displayName: String(row.display_name || "Teammate"),
       role,
       timezone: String(row.timezone || "UTC"),
-      notifyEnabled: row.notify_enabled !== false,
+      notifyEnabled: Boolean(row.notify_enabled),
       notifyMinute: Number(row.notify_minute ?? 480),
       removedAt: null,
     },
@@ -297,6 +297,17 @@ export function createSupabaseRemote() {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw new Error(error.message);
       recovery = false;
+    },
+    async changePassword(currentPassword: string, password: string) {
+      const email = (await supabase.auth.getUser()).data.user?.email;
+      if (!email) throw new Error("Sign in again.");
+      const check = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+      if (check.error) throw new Error("The current password is wrong.");
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw new Error(error.message);
+    },
+    async setMemberPassword(_memberId: string, _password: string) {
+      throw new Error("Ask them to use Forgot password. This book sends the reset email.");
     },
     async updateProfile(patch: Partial<Profile>) {
       const userId = (await supabase.auth.getUser()).data.user?.id;
