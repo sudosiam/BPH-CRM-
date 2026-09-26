@@ -192,10 +192,6 @@ export function createBook(dataFile) {
     if (!["lead", "sold", "lost"].includes(status)) return "Unknown status.";
     if (status !== "lead" && input.followUpOn) return "Sold and lost leads cannot have a follow-up.";
     if (status === "lead" && input.closedOn) return "An open lead cannot have a closed date.";
-    const owner = state.profiles.find(
-      (profile) => profile.id === input.ownerId && profile.orgId === auth.org.id && !profile.removedAt,
-    );
-    if (!owner) return "Choose an owner on the team.";
     return null;
   }
 
@@ -433,14 +429,6 @@ export function createBook(dataFile) {
       if (!member) return send(res, 404, { error: "That person is not on the team." });
       const now = new Date().toISOString();
       await mutate(async () => {
-        for (const lead of state.leads) {
-          if (lead.orgId === auth.org.id && lead.ownerId === member.id && !lead.deletedAt) {
-            lead.ownerId = auth.user.id;
-            lead.updatedBy = auth.user.id;
-            lead.version += 1;
-            lead.updatedAt = now;
-          }
-        }
         member.removedAt = now;
         state.sessions = state.sessions.filter((item) => item.userId !== member.id);
         persist();
@@ -512,7 +500,7 @@ export function createBook(dataFile) {
             status: input.status,
             followUpOn: input.followUpOn || null,
             closedOn: input.closedOn || null,
-            ownerId: input.ownerId,
+            ownerId: auth.user.id,
             createdBy: auth.user.id,
             updatedBy: auth.user.id,
             version: 1,
@@ -535,7 +523,6 @@ export function createBook(dataFile) {
         existing.status = input.status;
         existing.followUpOn = input.followUpOn || null;
         existing.closedOn = input.closedOn || null;
-        existing.ownerId = input.ownerId;
         existing.updatedBy = auth.user.id;
         existing.version += 1;
         existing.updatedAt = now;

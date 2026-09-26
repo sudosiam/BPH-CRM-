@@ -244,6 +244,28 @@ create trigger profiles_protect
 before update on public.profiles
 for each row execute function public.protect_profile();
 
+create or replace function public.freeze_lead_owner()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if auth.uid() is not null then
+      new.owner_id := auth.uid();
+      new.created_by := auth.uid();
+    end if;
+    return new;
+  end if;
+  new.owner_id := old.owner_id;
+  new.created_by := old.created_by;
+  return new;
+end;
+$$;
+
+create trigger leads_freeze_owner
+before insert or update on public.leads
+for each row execute function public.freeze_lead_owner();
+
 create or replace function public.remove_member(member_id uuid)
 returns void
 language plpgsql
@@ -273,13 +295,6 @@ begin
   ) then
     raise exception 'member not found';
   end if;
-
-  update public.leads
-  set owner_id = auth.uid(),
-      updated_by = auth.uid()
-  where org_id = org
-    and owner_id = member_id
-    and deleted_at is null;
 
   perform set_config('bph.profile_admin', 'on', true);
 

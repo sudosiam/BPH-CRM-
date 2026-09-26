@@ -281,7 +281,7 @@ function LeadSection({ title, className, rows, today }: { title: string; classNa
                 <span className="row-copy">
                   <span className="row-name">{lead.name}</span>
                   <span className={`row-sub ${due.className}`}>{due.text}</span>
-                  <span className="row-owner">{ownerName(book.profiles, lead.ownerId, book.me)}</span>
+                  <span className="row-owner">{ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me)}</span>
                 </span>
               </button>
               {call ? (
@@ -361,8 +361,8 @@ export function LeadsScreen() {
                   <span className="row-copy">
                     <span className="row-name">{lead.name}</span>
                     <span className={`row-sub ${sub.className}`}>{sub.text}</span>
-                    {lead.ownerId !== book.me?.id ? (
-                      <span className="row-owner">{ownerName(book.profiles, lead.ownerId, book.me)}</span>
+                    {(lead.createdBy || lead.ownerId) !== book.me?.id ? (
+                      <span className="row-owner">{ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me)}</span>
                     ) : null}
                   </span>
                 </button>
@@ -392,9 +392,9 @@ export function DetailScreen() {
   }
   const today = todayISO(book.me.timezone);
   const due = dueMeta(lead.followUpOn, today);
-  const active = book.profiles.filter((profile) => !profile.removedAt);
+  const adder = ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me);
   return (
-    <>
+    <div className="detail">
       <h1>{lead.name}</h1>
       <div className="status-switch" role="group" aria-label="Status">
         {(["lead", "sold", "lost"] as const).map((status) => (
@@ -420,7 +420,7 @@ export function DetailScreen() {
         </div>
       )}
       {lead.phone ? (
-        <>
+        <div className="card-block">
           <p className="detail-phone">{lead.phone}</p>
           <div className="pair">
             <a className="ghost wide" href={telHref(lead.phone)}>
@@ -430,7 +430,7 @@ export function DetailScreen() {
               WhatsApp
             </a>
           </div>
-        </>
+        </div>
       ) : null}
       {lead.notes ? (
         <div className="card-block">
@@ -438,23 +438,16 @@ export function DetailScreen() {
           <p className="notes">{lead.notes}</p>
         </div>
       ) : null}
-      <label className="field">
-        <span>Owner</span>
-        <select value={lead.ownerId} onChange={(event) => void book.setOwner(event.target.value)}>
-          {active.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.displayName}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="meta">
-        Last change · {ownerName(book.profiles, lead.updatedBy, book.me)} · {relativeTime(lead.updatedAt)}
-      </p>
+      <div className="detail-lines">
+        <p>Owner · {adder}</p>
+        <p>
+          Last change · {ownerName(book.profiles, lead.updatedBy, book.me)} · {relativeTime(lead.updatedAt)}
+        </p>
+      </div>
       <button className="delete-link" type="button" onClick={() => book.setSheet("delete")}>
         Delete lead
       </button>
-    </>
+    </div>
   );
 }
 
@@ -501,7 +494,6 @@ export function EditScreen() {
         },
   );
   const [formError, setFormError] = useState("");
-  const active = book.profiles.filter((profile) => !profile.removedAt);
   return (
     <>
       <label className="field">
@@ -529,16 +521,6 @@ export function EditScreen() {
       <label className="field">
         <span>Notes</span>
         <textarea maxLength={2000} placeholder="Optional" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
-      </label>
-      <label className="field">
-        <span>Owner</span>
-        <select value={draft.ownerId} onChange={(event) => setDraft({ ...draft, ownerId: event.target.value })}>
-          {active.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.displayName}
-            </option>
-          ))}
-        </select>
       </label>
       {formError ? <p className="form-error">{formError}</p> : null}
       <div className="form-actions">

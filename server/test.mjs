@@ -89,6 +89,19 @@ test("accounts, invite, sync, and conflict", async () => {
     });
     assert.equal(sold.status, 200);
     assert.equal(sold.data.lead.status, "sold");
+    assert.equal(sold.data.lead.ownerId, owner.data.user.id);
+
+    const kept = await json(base, "/api/leads", {
+      method: "POST",
+      token: mate.data.token,
+      body: {
+        baseVersion: sold.data.lead.version,
+        lead: { ...sold.data.lead, name: "Bright Home", ownerId: mate.data.user.id },
+      },
+    });
+    assert.equal(kept.status, 200);
+    assert.equal(kept.data.lead.ownerId, owner.data.user.id);
+    assert.equal(kept.data.lead.createdBy, owner.data.user.id);
 
     const conflict = await json(base, "/api/leads", {
       method: "POST",

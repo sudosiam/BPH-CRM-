@@ -531,12 +531,36 @@ h1 {
 .status-switch { margin-top: 16px; }
 .status-switch button { flex: 1; }
 
+.detail h1 { margin: 4px 0 0; }
+.detail .status-switch { margin-top: 14px; }
+.detail .card-block { margin-top: 14px; }
+.detail .card-block .field { margin-top: 12px; }
+.detail .card-block .meta { margin: 4px 0 0; }
+.detail .pair { margin-top: 12px; }
+
 .detail-phone {
-  margin: 18px 0 0;
-  font-size: 18px;
-  font-weight: 700;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
   letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
+
+.detail-lines {
+  margin-top: 16px;
+}
+
+.detail-lines p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.detail-lines p + p { margin-top: 2px; }
+
+.detail .delete-link { margin: 14px 0 0; }
 
 .due-line {
   margin: 2px 0 0;

@@ -59,7 +59,6 @@ type BookValue = {
   saveDraft: (draft: Draft) => Promise<void>;
   setStatus: (status: Lead["status"]) => Promise<void>;
   setFollowUp: (iso: string | null) => Promise<void>;
-  setOwner: (ownerId: string) => Promise<void>;
   deleteLead: () => Promise<void>;
   setReminders: (enabled: boolean) => Promise<void>;
   setReminderTime: (minute: number) => Promise<void>;
@@ -383,7 +382,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
             name,
             phone: next.phone.trim(),
             notes: next.notes.trim(),
-            ownerId: next.ownerId,
+            ownerId: current.ownerId,
             updatedBy: me.id,
             updatedAt: new Date().toISOString(),
           },
@@ -401,7 +400,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           status: "lead",
           followUpOn: next.followUpOn,
           closedOn: null,
-          ownerId: next.ownerId || me.id,
+          ownerId: me.id,
           createdBy: me.id,
           updatedBy: me.id,
           version: 0,
@@ -430,10 +429,6 @@ export function BookProvider({ children }: { children: ReactNode }) {
     async setFollowUp(iso) {
       await changeLead({ followUpOn: iso });
       showToast(iso ? "Follow-up saved" : "Follow-up cleared");
-    },
-    async setOwner(ownerId) {
-      await changeLead({ ownerId });
-      showToast(`Owner is ${profiles.find((profile) => profile.id === ownerId)?.displayName ?? "them"}`);
     },
     async deleteLead() {
       await changeLead({ deletedAt: new Date().toISOString() });
