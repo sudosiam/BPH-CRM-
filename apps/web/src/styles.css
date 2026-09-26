@@ -540,6 +540,35 @@ h1 {
 
 ::placeholder { color: #8a8175; opacity: 1; }
 
+.money {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #f6f3ec;
+  border-radius: 16px;
+  padding: 0 14px;
+  min-height: 52px;
+}
+.money svg { width: 22px; height: 22px; color: var(--green); flex: 0 0 auto; }
+.field .money input,
+.card-block .field .money input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 12px 0;
+  min-height: 48px;
+}
+.money:focus-within {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(31, 77, 58, 0.16);
+}
+.rupees {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.rupees svg { width: 0.82em; height: 0.82em; flex: 0 0 auto; }
 .field textarea { min-height: 96px; resize: vertical; }
 .form-error { color: var(--overdue); font-weight: 700; font-size: 14px; margin: 10px 0 0; }
 .form-actions { margin-top: 18px; }

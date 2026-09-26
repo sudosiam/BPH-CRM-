@@ -4,6 +4,7 @@ import { addDays, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOU
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
+import { IconRupee } from "./icons";
 import { APP_VERSION } from "./version";
 
 const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
@@ -36,6 +37,16 @@ function phoneZone() {
   } catch {
     return "UTC";
   }
+}
+
+function rupees(amount: number) {
+  const value = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(Number(amount) || 0);
+  return (
+    <span className="rupees">
+      <IconRupee />
+      {value}
+    </span>
+  );
 }
 
 function labelStatus(status: Lead["status"]) {
@@ -486,10 +497,10 @@ export function LeadsScreen() {
           {rows.map((lead) => {
             const sub =
               lead.status === "sold"
-                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}${lead.soldAmount ? ` · ৳${lead.soldAmount}` : ""}`, className: "quiet" }
+                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "quiet" }
                 : lead.status === "lost"
-                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, className: "quiet" }
-                  : dueMeta(lead.followUpOn, today);
+                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
+                  : { ...dueMeta(lead.followUpOn, today), amount: null };
             return (
               <div className="row" key={lead.id}>
                 <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
@@ -498,7 +509,10 @@ export function LeadsScreen() {
                   </span>
                   <span className="row-copy">
                     <span className="row-name">{lead.name}</span>
-                    <span className={`row-sub ${sub.className}`}>{sub.text}</span>
+                    <span className={`row-sub ${sub.className}`}>
+                      {sub.text}
+                      {sub.amount ? <> · {rupees(sub.amount)}</> : null}
+                    </span>
                     {(quietDays(lead.lastContactAt || lead.createdAt, today) ?? 0) >= 14 ? (
                       <span className="meta">Quiet {quietDays(lead.lastContactAt || lead.createdAt, today)}d</span>
                     ) : null}
@@ -572,15 +586,19 @@ export function DetailScreen() {
           {lead.status === "sold" ? (
             <label className="field">
               <span>Amount</span>
-              <input
-                inputMode="decimal"
-                placeholder="Optional"
-                value={lead.soldAmount ?? ""}
-                onChange={(event) => {
-                  const raw = event.target.value.trim();
-                  void book.setSoldAmount(raw ? Number(raw) : null);
-                }}
-              />
+              <div className="money">
+                <IconRupee />
+                <input
+                  inputMode="decimal"
+                  placeholder="Optional"
+                  aria-label="Amount in rupees"
+                  value={lead.soldAmount ?? ""}
+                  onChange={(event) => {
+                    const raw = event.target.value.trim();
+                    void book.setSoldAmount(raw ? Number(raw) : null);
+                  }}
+                />
+              </div>
             </label>
           ) : (
             <div className="chips">
@@ -820,7 +838,7 @@ export function AccountScreen() {
             </p>
             {book.email ? <p className="meta">{book.email}</p> : null}
             <p className="meta">
-              This month: {soldThisMonth(book.leads, today).count} sold · ৳{soldThisMonth(book.leads, today).amount}
+              This month: {soldThisMonth(book.leads, today).count} sold · {rupees(soldThisMonth(book.leads, today).amount)}
             </p>
           </div>
         </button>
@@ -978,7 +996,7 @@ export function MemberScreen() {
             <span>Sold this month</span>
           </div>
           <div className="stat">
-            <b>৳{sold.amount}</b>
+            <b>{rupees(sold.amount)}</b>
             <span>Sold amount</span>
           </div>
           <div className="stat">

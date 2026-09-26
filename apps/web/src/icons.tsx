@@ -41,6 +41,16 @@ export function IconYou() {
   );
 }
 
+export function IconRupee() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 4.5h12M6 8.5h12" />
+      <path d="M7 4.5c6 0 9 2.2 9 5.4S13 15 6.5 15" />
+      <path d="M9.5 15 18 21" />
+    </svg>
+  );
+}
+
 export function IconSettings() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
