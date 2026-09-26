@@ -5,6 +5,7 @@ import { digestCounts, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
   AuthScreen,
+  ResetScreen,
   CopyScreen,
   DetailScreen,
   EditScreen,
@@ -55,7 +56,7 @@ function useSystemBack(depth: number, onBack: () => void) {
 
 function Shell() {
   const book = useBook();
-  const bare = ["loading", "auth", "signup", "start", "join", "copy", "copy-error"].includes(book.phase);
+  const bare = ["loading", "auth", "signup", "reset", "start", "join", "copy", "copy-error"].includes(book.phase);
   const tabbed = book.phase === "app" && (book.screen === "today" || book.screen === "leads");
   const showFab = book.screen === "today" || book.screen === "leads";
   const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
@@ -191,6 +192,7 @@ function Shell() {
         {book.phase === "loading" ? <OpeningScreen /> : null}
         {book.phase === "auth" ? <AuthScreen /> : null}
         {book.phase === "signup" ? <SignupScreen /> : null}
+        {book.phase === "reset" ? <ResetScreen /> : null}
         {book.phase === "start" ? <StartScreen /> : null}
         {book.phase === "join" ? <JoinScreen /> : null}
         {book.phase === "copy" || book.phase === "copy-error" ? <CopyScreen /> : null}
@@ -234,6 +236,11 @@ function Shell() {
           </div>
         </div>
       ) : null}
+      {book.updateReady ? (
+        <button className="update-banner" type="button" onClick={book.applyUpdate}>
+          Update ready
+        </button>
+      ) : null}
       {book.sheet === "signout" ? (
         <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
           <div className="sheet" role="dialog" aria-modal="true">
@@ -244,6 +251,48 @@ function Shell() {
             </button>
             <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
               Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {book.sheet === "remove" ? (
+        <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
+          <div className="sheet" role="dialog" aria-modal="true">
+            <h2>Remove {book.profiles.find((profile) => profile.id === book.pendingMemberId)?.displayName || "this person"}?</h2>
+            <p>They lose access. They can join again with a current invite code.</p>
+            <button className="danger" type="button" onClick={() => void book.confirmRemove()}>
+              Remove from team
+            </button>
+            <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {book.sheet === "transfer" ? (
+        <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
+          <div className="sheet" role="dialog" aria-modal="true">
+            <h2>Make {book.profiles.find((profile) => profile.id === book.pendingMemberId)?.displayName || "them"} the owner?</h2>
+            <p>You become a member. They can remove people and change the invite code.</p>
+            <button className="primary" type="button" onClick={() => void book.confirmTransfer()}>
+              Transfer ownership
+            </button>
+            <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {book.sheet === "duplicate" ? (
+        <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
+          <div className="sheet" role="dialog" aria-modal="true">
+            <h2>This number is already on {book.duplicateLeadName}</h2>
+            <p>Save this lead anyway, or go back and check.</p>
+            <button className="primary" type="button" onClick={() => void book.confirmDuplicate()}>
+              Save anyway
+            </button>
+            <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
+              Go back
             </button>
           </div>
         </div>

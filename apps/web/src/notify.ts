@@ -2,7 +2,9 @@ import { digestCounts, digestLine, shouldSendDigest, todayISO } from "@shared/bo
 import type { Lead, Profile } from "./types";
 import { remote } from "./remote";
 
-const LOCAL_KEY = "bph-local-digest";
+function digestKey(me: Profile) {
+  return `bph-local-digest:${me.orgId}:${me.id}`;
+}
 
 function urlBase64ToUint8Array(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -60,7 +62,7 @@ export async function maybeLocalDigest(leads: Lead[], me: Profile | null, pushAc
       notifyEnabled: true,
       notifyMinute: me.notifyMinute,
       timeZone: me.timezone,
-      lastDigestOn: localStorage.getItem(LOCAL_KEY),
+      lastDigestOn: localStorage.getItem(digestKey(me)),
       now,
       dueCount,
     })
@@ -69,5 +71,5 @@ export async function maybeLocalDigest(leads: Lead[], me: Profile | null, pushAc
   }
   const body = digestLine(counts.today, counts.overdue);
   new Notification("Follow-ups", { body, icon: "/icon-192.png" });
-  localStorage.setItem(LOCAL_KEY, today);
+  localStorage.setItem(digestKey(me), today);
 }

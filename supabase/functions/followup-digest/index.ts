@@ -1,9 +1,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
 
+function safeZone(timeZone: string) {
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
 function todayISO(timeZone: string, now: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
+    timeZone: safeZone(timeZone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -14,7 +23,7 @@ function todayISO(timeZone: string, now: Date) {
 
 function localMinutes(timeZone: string, now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
+    timeZone: safeZone(timeZone),
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
@@ -34,11 +43,13 @@ Deno.serve(async () => {
     Deno.env.get("SUPABASE_URL") ?? "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   );
-  webpush.setVapidDetails(
-    Deno.env.get("VAPID_SUBJECT") || "mailto:reminders@bph.local",
-    Deno.env.get("VAPID_PUBLIC_KEY") ?? "",
-    Deno.env.get("VAPID_PRIVATE_KEY") ?? "",
-  );
+  const publicKey = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
+  const privateKey = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
+  if (!publicKey || !privateKey) {
+    return new Response(JSON.stringify({ sent: 0, error: "VAPID keys are not set" }), { status: 500 });
+  }
+  webpush.setVapidDetails(Deno.env.get("VAPID_SUBJECT") || "mailto:reminders@bph.local", publicKey, privateKey);
+  await supabase.rpc("purge_tombstones");
 
   const now = new Date();
   const { data: profiles, error } = await supabase
@@ -71,12 +82,14 @@ Deno.serve(async () => {
     if (dueToday) parts.push(`${dueToday} due today`);
     if (overdue) parts.push(`${overdue} overdue`);
     const { data: subs } = await supabase.from("push_subscriptions").select("endpoint, p256dh, auth").eq("user_id", profile.id);
+    let delivered = 0;
     for (const sub of subs ?? []) {
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           JSON.stringify({ title: "Follow-ups", body: parts.join(" · ") }),
         );
+        delivered += 1;
         sent += 1;
       } catch (pushError) {
         const status = (pushError as { statusCode?: number }).statusCode;
@@ -85,7 +98,9 @@ Deno.serve(async () => {
         }
       }
     }
-    await supabase.from("profiles").update({ last_digest_on: today }).eq("id", profile.id);
+    if (delivered > 0) {
+      await supabase.from("profiles").update({ last_digest_on: today }).eq("id", profile.id);
+    }
   }
 
   return new Response(JSON.stringify({ sent }), { headers: { "content-type": "application/json" } });

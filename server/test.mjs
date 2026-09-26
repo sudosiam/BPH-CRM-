@@ -1,11 +1,23 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { startServer } from "./index.mjs";
-import { shouldSendDigest, digestCounts, digestLine, nextCustomerName, hasLocalBook, membershipMatches } from "../shared/book.mjs";
-
+import { createBook, startServer } from "./index.mjs";
+import {
+  shouldSendDigest,
+  digestCounts,
+  digestLine,
+  nextCustomerName,
+  hasLocalBook,
+  membershipMatches,
+  assignCustomerName,
+  pullSince,
+  newId,
+  duplicatePhone,
+  leadsCsv,
+  todayISO,
+} from "../shared/book.mjs";
 async function boot() {
   const dataFile = path.join(mkdtempSync(path.join(tmpdir(), "bph-")), "book.json");
   const started = await startServer({ port: 0, dataFile });
@@ -185,4 +197,138 @@ test("digest stays quiet until the chosen time and when nothing is due", () => {
   assert.equal(membershipMatches(null, "u", "a@b.c"), false);
   assert.equal(nextCustomerName([]), "Customer 1");
   assert.equal(nextCustomerName(["Ada", "Customer 2", "Customer 9"]), "Customer 10");
+  assert.equal(assignCustomerName("Customer 1", ["Customer 1"]), "Customer 2");
+  assert.equal(assignCustomerName("Rafi", ["Rafi"]), "Rafi");
+  assert.equal(todayISO("Not/AZone", new Date("2026-09-26T12:00:00Z")), "2026-09-26");
+  assert.equal(pullSince("2026-09-26T12:00:00.000Z"), "2026-09-26T11:55:00.000Z");
+  assert.match(newId(), /^[0-9a-f-]{36}$/);
+  assert.equal(duplicatePhone([{ id: "a", phone: "+880 1819 220 441" }], "8801819220441", "b")?.id, "a");
+  assert.equal(duplicatePhone([{ id: "a", phone: "12" }], "12", null), null);
+  assert.match(leadsCsv([{ name: 'A "B"', phone: "1", notes: "line", status: "lead", followUpOn: "", closedOn: "", addedBy: "Rafi", updatedAt: "t" }]), /"A ""B"""/);
+});
+
+test("rejoin, idempotent insert, transfer, and a damaged book file", async () => {
+  const { server, base, book } = await boot();
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    const created = await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    const mate = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "nadia@bph.example", password: "password1", displayName: "Nadia" },
+    });
+    const joined = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: mate.data.token,
+      body: { code: created.data.org.inviteCode, displayName: "Nadia", timezone: "UTC" },
+    });
+    assert.equal(joined.status, 200);
+
+    const removed = await json(base, "/api/orgs/members/remove", {
+      method: "POST",
+      token: owner.data.token,
+      body: { memberId: mate.data.user.id },
+    });
+    assert.equal(removed.status, 200);
+    const signed = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "nadia@bph.example", password: "password1" },
+    });
+    assert.equal(signed.status, 200);
+    assert.equal(signed.data.removed, true);
+    assert.equal(signed.data.profile, null);
+    const rejoined = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: signed.data.token,
+      body: { code: created.data.org.inviteCode, displayName: "Nadia", timezone: "UTC" },
+    });
+    assert.equal(rejoined.status, 200);
+    assert.equal(rejoined.data.profile.role, "member");
+
+    const leadId = crypto.randomUUID();
+    const first = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: { id: leadId, name: "Customer 1", phone: "1", notes: "", status: "lead", followUpOn: "2026-09-26", closedOn: null },
+      },
+    });
+    const second = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: { id: leadId, name: "Customer 1", phone: "1", notes: "edited", status: "lead", followUpOn: "2026-09-26", closedOn: null },
+      },
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.data.lead.version, 1);
+    assert.equal(second.data.lead.notes, "");
+
+    const other = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: { id: crypto.randomUUID(), name: "Customer 1", phone: "2", notes: "", status: "lead", followUpOn: "2026-09-26", closedOn: null },
+      },
+    });
+    assert.equal(other.data.lead.name, "Customer 2");
+
+    const overlapped = await json(base, `/api/sync/pull?cursor=${encodeURIComponent(first.data.lead.updatedAt)}`, { token: owner.data.token });
+    assert.equal(overlapped.data.leads.some((lead) => lead.id === leadId), true);
+
+    const stream = await fetch(`${base}/api/sync/stream?token=${owner.data.token}`);
+    assert.equal(stream.status, 401);
+    stream.body?.cancel();
+
+    const badJson = await fetch(`${base}/api/auth/signup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    });
+    assert.equal(badJson.status, 400);
+
+    const badPath = await fetch(`${base}/%`);
+    assert.equal(badPath.status, 400);
+
+    const transferred = await json(base, "/api/orgs/transfer", {
+      method: "POST",
+      token: owner.data.token,
+      body: { memberId: mate.data.user.id },
+    });
+    assert.equal(transferred.status, 200);
+    const session = await json(base, "/api/auth/session", { token: owner.data.token });
+    assert.equal(session.data.profile.role, "member");
+
+    await json(base, "/api/profile", {
+      method: "PATCH",
+      token: signed.data.token,
+      body: { notifyEnabled: true, notifyMinute: 0, timezone: "UTC" },
+    });
+    await json(base, "/api/push/subscribe", {
+      method: "POST",
+      token: signed.data.token,
+      body: { endpoint: "https://push.example/gone", keys: { p256dh: "k", auth: "a" } },
+    });
+    await book.sendDueDigests(new Date("2026-09-26T12:00:00Z"));
+    assert.equal(book.state.digests[mate.data.user.id], undefined);
+  } finally {
+    server.close();
+  }
+
+  const dir = mkdtempSync(path.join(tmpdir(), "bph-file-"));
+  const damaged = path.join(dir, "book.json");
+  writeFileSync(damaged, "{");
+  assert.throws(() => createBook(damaged), /damaged/);
+  writeFileSync(`${damaged}.tmp`, JSON.stringify({ users: [{ id: "kept" }] }));
+  const recovered = createBook(damaged);
+  assert.equal(recovered.state.users[0].id, "kept");
 });

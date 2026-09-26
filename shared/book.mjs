@@ -6,9 +6,19 @@ export function normalizeCode(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+export function safeTimeZone(timeZone) {
+  const zone = String(timeZone || "UTC");
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+    return zone;
+  } catch {
+    return "UTC";
+  }
+}
+
 export function todayISO(timeZone = "UTC", now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
+    timeZone: safeTimeZone(timeZone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -32,7 +42,7 @@ export function dayDiff(iso, today) {
 
 export function localMinutes(timeZone, now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
+    timeZone: safeTimeZone(timeZone),
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
@@ -112,6 +122,61 @@ export function nextCustomerName(names) {
     if (number > max) max = number;
   }
   return `Customer ${max + 1}`;
+}
+
+export function assignCustomerName(requested, names) {
+  const trimmed = String(requested ?? "").trim();
+  const taken = names.map((name) => String(name ?? "").trim());
+  if (trimmed && !/^Customer \d+$/.test(trimmed)) return trimmed;
+  if (trimmed && !taken.includes(trimmed)) return trimmed;
+  return nextCustomerName(taken);
+}
+
+export function pullSince(cursor, overlapMs = 5 * 60 * 1000) {
+  if (!cursor) return null;
+  const time = Date.parse(cursor);
+  if (!Number.isFinite(time)) return null;
+  return new Date(time - overlapMs).toISOString();
+}
+
+export function newId() {
+  const cryptoObj = globalThis.crypto;
+  if (typeof cryptoObj?.randomUUID === "function") return cryptoObj.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof cryptoObj?.getRandomValues === "function") cryptoObj.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function phoneKey(phone) {
+  return String(phone ?? "").replace(/\D/g, "");
+}
+
+export function duplicatePhone(leads, phone, exceptId) {
+  const key = phoneKey(phone);
+  if (key.length < 6) return null;
+  return leads.find((lead) => lead.id !== exceptId && !lead.deletedAt && phoneKey(lead.phone) === key) ?? null;
+}
+
+export function csvCell(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+  return text;
+}
+
+export function leadsCsv(leads) {
+  const lines = [["Name", "Phone", "Notes", "Status", "Follow-up", "Closed", "Added by", "Updated"].join(",")];
+  for (const lead of leads) {
+    lines.push(
+      [lead.name, lead.phone, lead.notes, lead.status, lead.followUpOn || "", lead.closedOn || "", lead.addedBy || "", lead.updatedAt || ""]
+        .map(csvCell)
+        .join(","),
+    );
+  }
+  return lines.join("\n");
 }
 
 export function hasLocalBook(input) {

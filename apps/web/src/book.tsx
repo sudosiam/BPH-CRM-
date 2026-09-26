@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, hasLocalBook, nextCustomerName, todayISO } from "@shared/book.mjs";
-import { db, resetLocal } from "./db";
+import { addDays, assignCustomerName, duplicatePhone, hasLocalBook, leadsCsv, newId, todayISO } from "@shared/book.mjs";
+import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
@@ -9,7 +9,7 @@ import { remote, usingSupabase } from "./remote";
 import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
-type Phase = "loading" | "auth" | "signup" | "start" | "join" | "copy" | "copy-error" | "app";
+type Phase = "loading" | "auth" | "signup" | "reset" | "start" | "join" | "copy" | "copy-error" | "app";
 type Screen = "today" | "leads" | "account" | "detail" | "edit";
 type SyncWord = "synced" | "syncing" | "saved";
 
@@ -35,7 +35,11 @@ type BookValue = {
   copyLabel: string;
   error: string;
   toast: string;
-  sheet: "delete" | "signout" | null;
+  sheet: "delete" | "signout" | "remove" | "transfer" | "duplicate" | null;
+  pendingMemberId: string | null;
+  duplicateLeadName: string;
+  pushReady: boolean;
+  updateReady: boolean;
   detailId: string | null;
   segment: Lead["status"];
   query: string;
@@ -49,7 +53,7 @@ type BookValue = {
   back: () => void;
   startDraft: () => void;
   editCurrent: () => void;
-  setSheet: (sheet: "delete" | "signout" | null) => void;
+  setSheet: (sheet: BookValue["sheet"]) => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   createOrg: (name: string, displayName: string) => Promise<void>;
@@ -59,7 +63,7 @@ type BookValue = {
   retryCopy: () => Promise<void>;
   signOut: () => Promise<void>;
   confirmSignOut: () => Promise<void>;
-  saveDraft: (draft: Draft) => Promise<void>;
+  saveDraft: (draft: Draft, force?: boolean) => Promise<void>;
   setStatus: (status: Lead["status"]) => Promise<void>;
   setFollowUp: (iso: string | null) => Promise<void>;
   deleteLead: () => Promise<void>;
@@ -68,7 +72,16 @@ type BookValue = {
   waTemplate: string;
   setWaTemplate: (value: string) => void;
   regenerateCode: () => Promise<void>;
-  removeMember: (id: string) => Promise<void>;
+  removeMember: (id: string) => void;
+  confirmRemove: () => Promise<void>;
+  transferOwner: (id: string) => void;
+  confirmTransfer: () => Promise<void>;
+  confirmDuplicate: () => Promise<void>;
+  usePhoneZone: () => Promise<void>;
+  exportCsv: () => void;
+  requestPasswordReset: (email: string) => Promise<void>;
+  noteActivity: (leadId: string, text: string) => void;
+  applyUpdate: () => void;
   showToast: (text: string) => void;
   navDepth: number;
 };
@@ -86,7 +99,11 @@ function readWaTemplate() {
 }
 
 function zone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 export function BookProvider({ children }: { children: ReactNode }) {
@@ -95,7 +112,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [segment, setSegment] = useState<Lead["status"]>("lead");
   const [query, setQuery] = useState("");
-  const [sheet, setSheet] = useState<"delete" | "signout" | null>(null);
+  const [sheet, setSheet] = useState<BookValue["sheet"]>(null);
+  const [pendingMemberId, setPendingMemberId] = useState<string | null>(null);
+  const [pendingDraft, setPendingDraft] = useState<Draft | null>(null);
+  const [duplicateLeadName, setDuplicateLeadName] = useState("");
+  const [pushReady, setPushReady] = useState(false);
+  const [updateReady, setUpdateReady] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -171,15 +193,40 @@ export function BookProvider({ children }: { children: ReactNode }) {
     });
   }
 
+  async function clearPhoneCopy() {
+    await db.leads.clear();
+    await db.outbox.clear();
+    await db.profiles.clear();
+    await db.activity.clear();
+  }
+
+  async function flushBeforeSwitch() {
+    if ((await db.outbox.count()) === 0) return;
+    if (!navigator.onLine) throw new Error("This phone still has changes. Connect, wait until it says Synced, then sign in.");
+    await flushOutbox(showToast);
+    if ((await db.outbox.count()) > 0) throw new Error("Some changes are still on this phone. Wait until it says Synced, then sign in.");
+  }
+
   async function openAccount(account: Account, forceCopy: boolean) {
     const saved = await db.meta.get("local");
+    if (saved && saved.userId && saved.userId !== account.user.id) await clearPhoneCopy();
     const same =
       !forceCopy &&
       saved?.fullSyncComplete &&
       saved.userId === account.user.id &&
       saved.org?.id === account.org?.id;
-    if (!account.profile || !account.org) {
+    if (account.removed || !account.profile || !account.org) {
+      if (account.removed) {
+        try {
+          await flushOutbox(() => {});
+        } catch {
+          /* A removed person can no longer push. */
+        }
+        await clearPhoneCopy();
+      }
       await tokenFor(account.user.id, account.user.email, null, { fullSyncComplete: false, cursor: null });
+      setUserId(account.user.id);
+      setEmail(account.user.email);
       setPhase("start");
       return;
     }
@@ -269,6 +316,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setPhase("auth");
         return;
       }
+      if (account.removed) {
+        await openAccount(account, false);
+        return;
+      }
       if (opened && saved) {
         if (saved.userId === account.user.id && account.profile && account.org) {
           await tokenFor(account.user.id, account.user.email, account.org);
@@ -315,6 +366,22 @@ export function BookProvider({ children }: { children: ReactNode }) {
     syncBadge(leads, me);
     if (phase === "app") void maybeLocalDigest(leads, me, pushActive);
   }, [leads, me, phase, pushActive]);
+
+  useEffect(() => {
+    if (!org?.id) return;
+    try {
+      setWaTemplateState(localStorage.getItem(`${WA_KEY}:${org.id}`) ?? DEFAULT_WA_TEMPLATE);
+    } catch {
+      setWaTemplateState(DEFAULT_WA_TEMPLATE);
+    }
+  }, [org?.id]);
+
+  useEffect(() => {
+    void remote.vapidPublicKey().then((key) => setPushReady(Boolean(key))).catch(() => setPushReady(false));
+    const onUpdate = () => setUpdateReady(true);
+    window.addEventListener("bph-sw-update", onUpdate);
+    return () => window.removeEventListener("bph-sw-update", onUpdate);
+  }, []);
 
   async function changeLead(patch: Partial<Lead>) {
     const current = detailId ? await db.leads.get(detailId) : null;
@@ -378,6 +445,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     async signIn(emailAddress, password) {
       setError("");
       try {
+        await flushBeforeSwitch();
         await openAccount(await remote.signIn(emailAddress, password), false);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Could not sign in.");
@@ -501,12 +569,24 @@ export function BookProvider({ children }: { children: ReactNode }) {
       await finishSignOut();
     },
     confirmSignOut: finishSignOut,
-    async saveDraft(next) {
+    async saveDraft(next, force = false) {
       const typed = next.name.trim();
       const name =
         typed ||
-        nextCustomerName(leads.filter((lead) => lead.id !== next.id).map((lead) => lead.name));
+        assignCustomerName(
+          "",
+          leads.filter((lead) => lead.id !== next.id).map((lead) => lead.name),
+        );
       if (!org || !me) return;
+      if (!force) {
+        const existing = duplicatePhone(leads, next.phone, next.id);
+        if (existing) {
+          setPendingDraft({ ...next, name });
+          setDuplicateLeadName(leads.find((lead) => lead.id === existing.id)?.name || "another lead");
+          setSheet("duplicate");
+          return;
+        }
+      }
       if (next.id) {
         const current = await db.leads.get(next.id);
         if (!current) return;
@@ -523,10 +603,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
           current.version,
         );
         showToast("Saved");
+        void logActivity(current.id, "Edited");
         setStack((current) => current.slice(0, -1));
       } else {
         const lead: Lead = {
-          id: crypto.randomUUID(),
+          id: newId(),
           orgId: org.id,
           name,
           phone: next.phone.trim(),
@@ -543,6 +624,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           deletedAt: null,
         };
         await queueLead(lead, null);
+        void logActivity(lead.id, "Added");
         setDetailId(lead.id);
         setStack((current) => [current[0] ?? "today", "detail"]);
         showToast("Lead saved");
@@ -558,10 +640,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
           ? { status, closedOn: null, followUpOn: current.followUpOn || addDays(today, 1) }
           : { status, followUpOn: null, closedOn: today },
       );
-      showToast(status === "sold" ? "Marked sold" : status === "lost" ? "Marked lost" : "Back to Lead");
+      const label = status === "sold" ? "Marked sold" : status === "lost" ? "Marked lost" : "Back to Lead";
+      if (detailId) void logActivity(detailId, label);
+      showToast(label);
     },
     async setFollowUp(iso) {
       await changeLead({ followUpOn: iso });
+      if (detailId) void logActivity(detailId, iso ? "Follow-up changed" : "Follow-up cleared");
       showToast(iso ? "Follow-up saved" : "Follow-up cleared");
     },
     async deleteLead() {
@@ -595,7 +680,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       const next = value.slice(0, 500);
       setWaTemplateState(next);
       try {
-        localStorage.setItem(WA_KEY, next);
+        localStorage.setItem(org?.id ? `${WA_KEY}:${org.id}` : WA_KEY, next);
       } catch {
         /* Private browsing can block storage. The template still applies until refresh. */
       }
@@ -606,13 +691,90 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (current?.org) await db.meta.put({ ...current, org: { ...current.org, inviteCode } });
       showToast("New code ready");
     },
-    async removeMember(id) {
-      await remote.removeMember(id);
-      const profile = await db.profiles.get(id);
+    removeMember(id) {
+      setPendingMemberId(id);
+      setSheet("remove");
+    },
+    async confirmRemove() {
+      if (!pendingMemberId) return;
+      await remote.removeMember(pendingMemberId);
+      const profile = await db.profiles.get(pendingMemberId);
       if (profile) await db.profiles.put({ ...profile, removedAt: new Date().toISOString() });
+      setSheet(null);
+      setPendingMemberId(null);
       showToast("Removed from the team");
       void syncNow();
     },
+    transferOwner(id) {
+      setPendingMemberId(id);
+      setSheet("transfer");
+    },
+    async confirmTransfer() {
+      if (!pendingMemberId || !me) return;
+      await remote.transferOwner(pendingMemberId);
+      const nextOwner = await db.profiles.get(pendingMemberId);
+      const self = await db.profiles.get(me.id);
+      if (self) await db.profiles.put({ ...self, role: "member" });
+      if (nextOwner) await db.profiles.put({ ...nextOwner, role: "owner" });
+      setSheet(null);
+      setPendingMemberId(null);
+      showToast("They are the owner now");
+      void syncNow();
+    },
+    async confirmDuplicate() {
+      const draft = pendingDraft;
+      setSheet(null);
+      setPendingDraft(null);
+      if (draft) await this.saveDraft(draft, true);
+    },
+    async usePhoneZone() {
+      if (!me) return;
+      const profile = await remote.updateProfile({ ...me, timezone: zone() });
+      await db.profiles.put(profile);
+      showToast("Time zone saved");
+    },
+    exportCsv() {
+      const names = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+      const csv = leadsCsv(
+        leads.map((lead) => ({
+          name: lead.name,
+          phone: lead.phone,
+          notes: lead.notes,
+          status: lead.status,
+          followUpOn: lead.followUpOn,
+          closedOn: lead.closedOn,
+          addedBy: names.get(lead.createdBy || lead.ownerId) || "",
+          updatedAt: lead.updatedAt,
+        })),
+      );
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "bph-leads.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+    async requestPasswordReset(emailAddress) {
+      setError("");
+      try {
+        const result = await remote.requestPasswordReset(emailAddress);
+        showToast(result.message);
+        setPhase("auth");
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Could not send the reset email.");
+      }
+    },
+    noteActivity(leadId, text) {
+      void logActivity(leadId, text);
+    },
+    applyUpdate() {
+      window.dispatchEvent(new Event("bph-apply-update"));
+    },
+    pendingMemberId,
+    duplicateLeadName,
+    pushReady,
+    updateReady,
     showToast,
   };
 

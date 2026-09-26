@@ -85,6 +85,18 @@ export function createHttpRemote() {
       });
       if (!response.ok) throw new Error(data.error || "Could not remove them.");
     },
+    async transferOwner(memberId: string) {
+      const { response, data } = await request("/api/orgs/transfer", {
+        method: "POST",
+        body: JSON.stringify({ memberId }),
+      });
+      if (!response.ok) throw new Error(data.error || "Could not transfer the business.");
+    },
+    async requestPasswordReset(_email: string) {
+      const { response, data } = await request("/api/auth/reset", { method: "POST", body: JSON.stringify({}) });
+      if (!response.ok) throw new Error(data.error || "Could not reset the password.");
+      return { sent: Boolean(data.sent), message: String(data.message || "Check your email.") };
+    },
     async updateProfile(patch: Partial<Profile>) {
       const { response, data } = await request("/api/profile", {
         method: "PATCH",
@@ -129,9 +141,38 @@ export function createHttpRemote() {
     },
     subscribe(onChange: () => void) {
       if (!token) return () => {};
-      const source = new EventSource(`/api/sync/stream?token=${encodeURIComponent(token)}`);
-      source.onmessage = () => onChange();
-      return () => source.close();
+      const controller = new AbortController();
+      const run = async () => {
+        while (!controller.signal.aborted) {
+          try {
+            const response = await fetch("/api/sync/stream", {
+              headers: { authorization: `Bearer ${token}` },
+              signal: controller.signal,
+            });
+            if (!response.ok || !response.body) throw new Error("stream");
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (!controller.signal.aborted) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              let split = buffer.indexOf("\n\n");
+              while (split >= 0) {
+                const chunk = buffer.slice(0, split);
+                buffer = buffer.slice(split + 2);
+                if (chunk.includes("data:")) onChange();
+                split = buffer.indexOf("\n\n");
+              }
+            }
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        }
+      };
+      void run();
+      return () => controller.abort();
     },
   };
 }

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, createReadStream } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import webpush from "web-push";
@@ -12,26 +12,47 @@ import {
   digestCounts,
   digestLine,
   shouldSendDigest,
+  pullSince,
+  assignCustomerName,
+  safeTimeZone,
 } from "../shared/book.mjs";
 
 const scryptAsync = promisify(scrypt);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(root, "apps/web/dist");
 
+function readBookFile(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    if (error && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 export function createBook(dataFile) {
   mkdirSync(path.dirname(dataFile), { recursive: true });
-  const state = existsSync(dataFile)
-    ? JSON.parse(readFileSync(dataFile, "utf8"))
-    : {
-        users: [],
-        sessions: [],
-        orgs: [],
-        profiles: [],
-        leads: [],
-        subscriptions: [],
-        digests: {},
-        vapid: null,
-      };
+  const fresh = {
+    users: [],
+    sessions: [],
+    orgs: [],
+    profiles: [],
+    leads: [],
+    subscriptions: [],
+    digests: {},
+    vapid: null,
+  };
+  let state = fresh;
+  if (existsSync(dataFile)) {
+    try {
+      state = readBookFile(dataFile);
+    } catch {
+      const recovered = readBookFile(`${dataFile}.tmp`);
+      if (!recovered) throw new Error(`Could not read ${dataFile}. The book file is damaged.`);
+      state = recovered;
+    }
+  }
+  state = { ...fresh, ...state };
   if (!state.digests) state.digests = {};
   if (!state.subscriptions) state.subscriptions = [];
   if (!state.vapid) {
@@ -50,7 +71,15 @@ export function createBook(dataFile) {
     return run;
   }
   function persist() {
-    writeFileSync(dataFile, JSON.stringify(state));
+    const tmp = `${dataFile}.tmp`;
+    const fd = openSync(tmp, "w");
+    try {
+      writeSync(fd, JSON.stringify(state));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, dataFile);
   }
 
   const streams = new Set();
@@ -97,11 +126,10 @@ export function createBook(dataFile) {
     return { user, profile, org, session, removed: false };
   }
 
-  function authFrom(req, url) {
+  function authFrom(req) {
     const header = req.headers.authorization || "";
     const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const token = bearer || url.searchParams.get("token") || "";
-    return sessionUser(token);
+    return sessionUser(bearer);
   }
 
   async function hashPassword(password, salt = randomBytes(16).toString("hex")) {
@@ -131,6 +159,11 @@ export function createBook(dataFile) {
   const attempts = new Map();
   function limited(key, max) {
     const now = Date.now();
+    if (attempts.size > 200) {
+      for (const [savedKey, saved] of attempts) {
+        if (saved.reset < now) attempts.delete(savedKey);
+      }
+    }
     const row = attempts.get(key) ?? { count: 0, reset: now + 15 * 60 * 1000 };
     if (row.reset < now) {
       row.count = 0;
@@ -178,6 +211,7 @@ export function createBook(dataFile) {
       user: { id: auth.user.id, email: auth.user.email, displayName: auth.user.displayName },
       profile: auth.profile ? publicProfile(auth.profile) : null,
       org: auth.org ? publicOrg(auth.org, auth.profile?.role) : null,
+      removed: Boolean(auth.removed),
     };
   }
 
@@ -216,20 +250,24 @@ export function createBook(dataFile) {
       }
       const body = digestLine(counts.today, counts.overdue);
       const subs = state.subscriptions.filter((item) => item.userId === profile.id);
+      let delivered = 0;
       for (const sub of subs) {
         try {
           await webpush.sendNotification(
             { endpoint: sub.endpoint, keys: sub.keys },
             JSON.stringify({ title: "Follow-ups", body }),
           );
+          delivered += 1;
         } catch (error) {
           if (error.statusCode === 404 || error.statusCode === 410) {
             state.subscriptions = state.subscriptions.filter((item) => item.endpoint !== sub.endpoint);
           }
         }
       }
-      state.digests[profile.id] = today;
-      persist();
+      if (delivered > 0) {
+        state.digests[profile.id] = today;
+        persist();
+      }
     }
   }
 
@@ -239,8 +277,13 @@ export function createBook(dataFile) {
       try {
         await handleApi(req, res, url);
       } catch (error) {
+        if (res.headersSent) return;
+        if (error instanceof SyntaxError) {
+          send(res, 400, { error: "That request was not valid JSON." });
+          return;
+        }
         console.error(error);
-        if (!res.headersSent) send(res, 500, { error: "Something went wrong." });
+        send(res, error.status || 500, { error: error.status ? error.message : "Something went wrong." });
       }
       return;
     }
@@ -254,7 +297,7 @@ export function createBook(dataFile) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/sync/stream") {
-      const auth = authFrom(req, url);
+      const auth = authFrom(req);
       const denied = requireMember(auth);
       if (denied) {
         send(res, denied.status, denied.body);
@@ -306,18 +349,11 @@ export function createBook(dataFile) {
         persist();
       });
       const auth = sessionUser(token);
-      if (auth?.removed) {
-        await mutate(async () => {
-          state.sessions = state.sessions.filter((item) => item.token !== token);
-          persist();
-        });
-        return send(res, 403, { error: "You no longer have access to this business." });
-      }
       send(res, 200, accountBody(auth, token));
       return;
     }
 
-    const auth = authFrom(req, url);
+    const auth = authFrom(req);
 
     if (req.method === "POST" && url.pathname === "/api/auth/signout") {
       if (auth) {
@@ -332,15 +368,21 @@ export function createBook(dataFile) {
 
     if (req.method === "GET" && url.pathname === "/api/auth/session") {
       if (!auth) return send(res, 401, { error: "Sign in again." });
-      if (auth.removed) return send(res, 403, { error: "You no longer have access to this business." });
       send(res, 200, accountBody(auth, auth.session.token));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/reset") {
+      await readJson(req);
+      send(res, 200, { ok: true, sent: false, message: "This server does not send email. The person who runs it can set a new password." });
       return;
     }
 
     if (!auth) return send(res, 401, { error: "Sign in again." });
 
     if (req.method === "POST" && url.pathname === "/api/orgs") {
-      if (state.profiles.some((item) => item.id === auth.user.id)) {
+      const current = state.profiles.find((item) => item.id === auth.user.id);
+      if (current && !current.removedAt) {
         return send(res, 400, { error: "You already belong to a business." });
       }
       const body = await readJson(req);
@@ -355,12 +397,12 @@ export function createBook(dataFile) {
         createdBy: auth.user.id,
         createdAt: new Date().toISOString(),
       };
-      const profile = {
+      const profile = current ?? {
         id: auth.user.id,
         orgId: org.id,
         displayName,
         role: "owner",
-        timezone: String(body.timezone || "UTC").slice(0, 64),
+        timezone: safeTimeZone(body.timezone),
         notifyEnabled: false,
         notifyMinute: 480,
         removedAt: null,
@@ -368,8 +410,13 @@ export function createBook(dataFile) {
       await mutate(async () => {
         org.inviteCode = freshCode();
         auth.user.displayName = displayName;
+        profile.orgId = org.id;
+        profile.displayName = displayName;
+        profile.role = "owner";
+        profile.timezone = safeTimeZone(body.timezone);
+        profile.removedAt = null;
         state.orgs.push(org);
-        state.profiles.push(profile);
+        if (!current) state.profiles.push(profile);
         persist();
       });
       send(res, 200, { org: publicOrg(org, "owner"), profile: publicProfile(profile) });
@@ -377,7 +424,8 @@ export function createBook(dataFile) {
     }
 
     if (req.method === "POST" && url.pathname === "/api/orgs/join") {
-      if (state.profiles.some((item) => item.id === auth.user.id)) {
+      const current = state.profiles.find((item) => item.id === auth.user.id);
+      if (current && !current.removedAt) {
         return send(res, 400, { error: "You already belong to a business." });
       }
       if (limited(`join:${auth.user.id}`, 10)) return send(res, 429, { error: "Too many tries. Wait a few minutes." });
@@ -387,19 +435,24 @@ export function createBook(dataFile) {
       const org = state.orgs.find((item) => item.inviteCode === code);
       if (!org) return send(res, 400, { error: "That code does not match a business." });
       if (displayName.length < 1 || displayName.length > 80) return send(res, 400, { error: "Add your name." });
-      const profile = {
+      const profile = current ?? {
         id: auth.user.id,
         orgId: org.id,
         displayName,
         role: "member",
-        timezone: String(body.timezone || "UTC").slice(0, 64),
+        timezone: safeTimeZone(body.timezone),
         notifyEnabled: false,
         notifyMinute: 480,
         removedAt: null,
       };
       await mutate(async () => {
         auth.user.displayName = displayName;
-        state.profiles.push(profile);
+        profile.orgId = org.id;
+        profile.displayName = displayName;
+        profile.role = "member";
+        profile.timezone = safeTimeZone(body.timezone);
+        profile.removedAt = null;
+        if (!current) state.profiles.push(profile);
         persist();
       });
       broadcast(org.id);
@@ -438,6 +491,21 @@ export function createBook(dataFile) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/orgs/transfer") {
+      if (auth.profile.role !== "owner") return send(res, 403, { error: "Only the owner can transfer the business." });
+      const body = await readJson(req);
+      const member = state.profiles.find((item) => item.id === body.memberId && item.orgId === auth.org.id && !item.removedAt);
+      if (!member || member.id === auth.user.id) return send(res, 404, { error: "That person is not on the team." });
+      await mutate(async () => {
+        auth.profile.role = "member";
+        member.role = "owner";
+        persist();
+      });
+      broadcast(auth.org.id);
+      send(res, 200, { ok: true });
+      return;
+    }
+
     if (req.method === "PATCH" && url.pathname === "/api/profile") {
       const body = await readJson(req);
       await mutate(async () => {
@@ -447,7 +515,7 @@ export function createBook(dataFile) {
           auth.profile.displayName = displayName;
           auth.user.displayName = displayName;
         }
-        if (body.timezone != null) auth.profile.timezone = String(body.timezone).slice(0, 64) || "UTC";
+        if (body.timezone != null) auth.profile.timezone = safeTimeZone(String(body.timezone).slice(0, 64));
         if (body.notifyEnabled != null) auth.profile.notifyEnabled = Boolean(body.notifyEnabled);
         if (body.notifyMinute != null) {
           const minute = Number(body.notifyMinute);
@@ -468,10 +536,16 @@ export function createBook(dataFile) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/sync/pull") {
-      const cursor = url.searchParams.get("cursor");
-      const serverTime = new Date().toISOString();
-      const leads = state.leads.filter((lead) => lead.orgId === auth.org.id && (!cursor || lead.updatedAt > cursor));
+      const since = pullSince(url.searchParams.get("cursor"));
+      const cutoff = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+      await mutate(async () => {
+        const before = state.leads.length;
+        state.leads = state.leads.filter((lead) => !lead.deletedAt || lead.deletedAt > cutoff);
+        if (state.leads.length !== before) persist();
+      });
+      const leads = state.leads.filter((lead) => lead.orgId === auth.org.id && (!since || lead.updatedAt > since));
       const profiles = state.profiles.filter((profile) => profile.orgId === auth.org.id);
+      const serverTime = new Date().toISOString();
       send(res, 200, {
         serverTime,
         leads: leads.map(publicLead),
@@ -491,10 +565,11 @@ export function createBook(dataFile) {
         const existing = state.leads.find((lead) => lead.id === input.id);
         if (!existing) {
           if (body.baseVersion != null) return { status: 409, body: { error: "conflict", lead: null, deleted: true } };
+          const names = state.leads.filter((lead) => lead.orgId === auth.org.id && !lead.deletedAt).map((lead) => lead.name);
           const lead = {
             id: String(input.id),
             orgId: auth.org.id,
-            name: String(input.name).trim(),
+            name: assignCustomerName(String(input.name).trim(), names),
             phone: String(input.phone ?? "").trim(),
             notes: String(input.notes ?? ""),
             status: input.status,
@@ -513,6 +588,9 @@ export function createBook(dataFile) {
           return { status: 200, body: { lead: publicLead(lead) }, orgId: auth.org.id };
         }
         if (existing.orgId !== auth.org.id) return { status: 404, body: { error: "This lead is gone." } };
+        if (body.baseVersion == null) {
+          return { status: 200, body: { lead: publicLead(existing) }, orgId: auth.org.id };
+        }
         if (existing.deletedAt) return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
         if (existing.version !== body.baseVersion) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: false } };
@@ -561,7 +639,13 @@ export function createBook(dataFile) {
       send(res, 503, { error: "App build is missing. Run npm start from the repo root." });
       return;
     }
-    const requested = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+    let requested = "";
+    try {
+      requested = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+    } catch {
+      send(res, 400, { error: "Bad path." });
+      return;
+    }
     const filePath = path.resolve(distDir, requested);
     const safe = filePath.startsWith(`${distDir}${path.sep}`) && existsSync(filePath) && statSync(filePath).isFile();
     const target = safe ? filePath : path.join(distDir, "index.html");

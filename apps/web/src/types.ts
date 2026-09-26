@@ -39,6 +39,7 @@ export type Account = {
   user: { id: string; email: string; displayName: string };
   profile: Profile | null;
   org: Org | null;
+  removed?: boolean;
 };
 
 export type Pull = {

@@ -876,6 +876,20 @@ h1 {
 
 #toast.low { bottom: calc(20px + var(--safe-bottom)); }
 
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(88px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 20;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #1f6b45;
+  color: white;
+  font: inherit;
+}
+
 #sheet {
   position: absolute;
   inset: 0;

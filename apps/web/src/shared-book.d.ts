@@ -23,6 +23,29 @@ declare module "@shared/book.mjs" {
   export function dueMeta(iso: string | null, today: string): { text: string; className: string };
   export function initials(name: string): string;
   export function nextCustomerName(names: string[]): string;
+  export function assignCustomerName(requested: string, names: string[]): string;
+  export function pullSince(cursor: string | null, overlapMs?: number): string | null;
+  export function newId(): string;
+  export function phoneKey(phone: string): string;
+  export function duplicatePhone(
+    leads: Array<{ id: string; phone?: string; deletedAt?: string | null }>,
+    phone: string,
+    exceptId: string | null,
+  ): { id: string; phone?: string; deletedAt?: string | null } | null;
+  export function csvCell(value: unknown): string;
+  export function leadsCsv(
+    leads: Array<{
+      name: string;
+      phone?: string;
+      notes?: string;
+      status: string;
+      followUpOn?: string | null;
+      closedOn?: string | null;
+      addedBy?: string;
+      updatedAt?: string;
+    }>,
+  ): string;
+  export function safeTimeZone(timeZone?: string): string;
   export function hasLocalBook(input: {
     userId: string;
     hasProfile: boolean;

@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { pullSince } from "@shared/book.mjs";
 import type { Account, Lead, Org, Profile, Pull, PushResult } from "./types";
 
 export function resolveSupabaseUrl(value: string | undefined) {
@@ -104,14 +105,16 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
   const profileResult = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
   if (profileResult.error && isNetworkError(profileResult.error)) throw new Error(profileResult.error.message);
   const profileRow = profileResult.error ? null : profileResult.data;
+  const removed = Boolean(profileRow && profileRow.removed_at);
   let profile = profileRow && !profileRow.removed_at ? mapProfile(profileRow) : null;
   let org: Org | null = null;
   if (profile) {
-    const orgResult = await supabase.from("orgs").select("*").eq("id", profile.orgId).maybeSingle();
+    let orgResult = await supabase.from("orgs_visible").select("id, name, invite_code").eq("id", profile.orgId).maybeSingle();
+    if (orgResult.error) orgResult = await supabase.from("orgs").select("id, name, invite_code").eq("id", profile.orgId).maybeSingle();
     if (orgResult.error && isNetworkError(orgResult.error)) throw new Error(orgResult.error.message);
     org = !orgResult.error && orgResult.data ? mapOrg(orgResult.data, profile.role) : null;
   }
-  if (!profile || !org) {
+  if (!removed && (!profile || !org)) {
     const found = await membershipFromBook(supabase, session.user.id);
     if (found) {
       profile = profile ?? found.profile;
@@ -126,6 +129,7 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
     },
     profile,
     org,
+    removed,
   };
 }
 
@@ -189,6 +193,15 @@ export function createSupabaseRemote() {
       const { error } = await supabase.rpc("remove_member", { member_id: memberId });
       if (error) throw new Error(error.message);
     },
+    async transferOwner(memberId: string) {
+      const { error } = await supabase.rpc("transfer_owner", { member_id: memberId });
+      if (error) throw new Error(error.message);
+    },
+    async requestPasswordReset(email: string) {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      if (error) throw new Error(error.message);
+      return { sent: true, message: "Check your email for a link to choose a new password." };
+    },
     async updateProfile(patch: Partial<Profile>) {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const row: Record<string, unknown> = {};
@@ -201,10 +214,9 @@ export function createSupabaseRemote() {
       return mapProfile(data);
     },
     async pull(cursor: string | null): Promise<Pull> {
-      const { data: serverTime, error: timeError } = await supabase.rpc("server_now");
-      if (timeError) throw new Error(timeError.message);
+      const since = pullSince(cursor);
       let leadQuery = supabase.from("leads").select("*").order("updated_at");
-      if (cursor) leadQuery = leadQuery.gt("updated_at", cursor);
+      if (since) leadQuery = leadQuery.gt("updated_at", since);
       const [{ data: leadRows, error: leadError }, { data: profileRows, error: profileError }, account] = await Promise.all([
         leadQuery,
         supabase.from("profiles").select("*"),
@@ -213,6 +225,8 @@ export function createSupabaseRemote() {
       if (leadError) throw new Error(leadError.message);
       if (profileError) throw new Error(profileError.message);
       if (!account?.org) throw new Error("Join a business first.");
+      const { data: serverTime, error: timeError } = await supabase.rpc("server_now");
+      if (timeError) throw new Error(timeError.message);
       return {
         serverTime: String(serverTime),
         leads: (leadRows ?? []).map((row) => mapLead(row)),
@@ -225,8 +239,13 @@ export function createSupabaseRemote() {
       const row = toRow(lead, userId);
       if (baseVersion == null) {
         const { data, error } = await supabase.from("leads").insert(row).select("*").single();
-        if (error) throw new Error(error.message);
-        return { ok: true, lead: mapLead(data) };
+        if (!error && data) return { ok: true, lead: mapLead(data) };
+        const duplicate = error?.code === "23505" || /duplicate key/i.test(error?.message || "");
+        if (duplicate) {
+          const current = await supabase.from("leads").select("*").eq("id", lead.id).maybeSingle();
+          if (current.data) return { ok: true, lead: mapLead(current.data) };
+        }
+        throw new Error(error?.message || "Could not sync.");
       }
       const { data, error } = await supabase.from("leads").update(row).eq("id", lead.id).eq("version", baseVersion).select("*").maybeSingle();
       if (error) throw new Error(error.message);
@@ -245,6 +264,12 @@ export function createSupabaseRemote() {
     },
     async saveSubscription(subscription: PushSubscriptionJSON) {
       const userId = (await supabase.auth.getUser()).data.user?.id;
+      const saved = await supabase.rpc("save_push_subscription", {
+        p_endpoint: subscription.endpoint,
+        p_p256dh: subscription.keys?.p256dh,
+        p_auth: subscription.keys?.auth,
+      });
+      if (!saved.error) return;
       const { error } = await supabase.from("push_subscriptions").upsert(
         {
           user_id: userId,
@@ -257,14 +282,18 @@ export function createSupabaseRemote() {
       if (error) throw new Error(error.message);
     },
     subscribe(onChange: () => void) {
-      let orgId = "";
       const channel = supabase.channel("bph-book");
       void loadAccount(supabase)
         .then((account) => {
-          orgId = account?.org?.id ?? "";
+          const orgId = account?.org?.id ?? "";
+          const userId = account?.user.id ?? "";
           if (!orgId) return;
           channel
-            .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `org_id=eq.${orgId}` }, () => onChange())
+            .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `org_id=eq.${orgId}` }, (payload) => {
+              const row = payload.new as { updated_by?: string } | null;
+              if (row?.updated_by && row.updated_by === userId) return;
+              onChange();
+            })
             .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `org_id=eq.${orgId}` }, () => onChange())
             .subscribe();
         })

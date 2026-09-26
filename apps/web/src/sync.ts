@@ -66,37 +66,77 @@ export function enqueueSync<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+async function settlePush(
+  item: { id: string; rev: number },
+  result: Awaited<ReturnType<typeof remote.pushLead>>,
+) {
+  const current = await db.outbox.get(item.id);
+  if (!result.ok) return false;
+  if (!current || current.rev === item.rev) {
+    if (result.lead.deletedAt) await db.leads.delete(item.id);
+    else await db.leads.put(result.lead);
+    await db.outbox.delete(item.id);
+  } else {
+    await db.outbox.put({ ...current, baseVersion: result.lead.version });
+  }
+  return true;
+}
+
 export async function flushOutbox(onNotice: (message: string) => void) {
   const meta = await db.meta.get("local");
   if (!meta?.fullSyncComplete) return;
-  const items = await db.outbox.toArray();
-  for (const item of items) {
-    const lead = await db.leads.get(item.id);
-    if (!lead) {
-      await db.outbox.delete(item.id);
-      continue;
-    }
-    const result = await remote.pushLead(lead, item.baseVersion);
-    const current = await db.outbox.get(item.id);
-    if (result.ok) {
-      if (!current || current.rev === item.rev) {
-        if (result.lead.deletedAt) await db.leads.delete(item.id);
-        else await db.leads.put(result.lead);
+  for (let pass = 0; pass < 3; pass += 1) {
+    const items = await db.outbox.toArray();
+    if (!items.length) return;
+    let progressed = false;
+    for (const item of items) {
+      try {
+        const lead = await db.leads.get(item.id);
+        if (!lead) {
+          await db.outbox.delete(item.id);
+          progressed = true;
+          continue;
+        }
+        let result = await remote.pushLead(lead, item.baseVersion);
+        if (await settlePush(item, result)) {
+          progressed = true;
+          continue;
+        }
+        if (result.ok) continue;
+        if (!result.deleted && result.lead) {
+          const merged = {
+            ...result.lead,
+            name: lead.name,
+            phone: lead.phone,
+            notes: lead.notes,
+            status: lead.status,
+            followUpOn: lead.followUpOn,
+            closedOn: lead.closedOn,
+            deletedAt: lead.deletedAt,
+            updatedBy: lead.updatedBy,
+          };
+          result = await remote.pushLead(merged, result.lead.version);
+          if (await settlePush(item, result)) {
+            progressed = true;
+            continue;
+          }
+        }
+        const kept = result.ok ? null : result.lead;
+        if (!kept || kept.deletedAt || (!result.ok && result.deleted)) {
+          await db.leads.delete(item.id);
+          onNotice("This lead was deleted.");
+        } else {
+          await db.leads.put(kept);
+          const actor = (await db.profiles.get(kept.updatedBy))?.displayName ?? "someone";
+          onNotice(`This lead was updated by ${actor}. Your change was not saved.`);
+        }
         await db.outbox.delete(item.id);
-      } else {
-        await db.outbox.put({ ...current, baseVersion: result.lead.version });
+        progressed = true;
+      } catch {
+        /* Leave this change queued. The next ones still go out. */
       }
-      continue;
     }
-    if (result.deleted || !result.lead) {
-      await db.leads.delete(item.id);
-      onNotice("This lead was deleted.");
-    } else {
-      await db.leads.put(result.lead);
-      const actor = (await db.profiles.get(result.lead.updatedBy))?.displayName ?? "someone";
-      onNotice(`This lead was updated by ${actor}. Your change was not saved.`);
-    }
-    await db.outbox.delete(item.id);
+    if (!progressed) return;
   }
 }
 

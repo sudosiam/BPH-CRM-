@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, dayDiff, digestCounts, digestLine, dueMeta, initials, longDate, prettyDate, relativeTime, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
+import { db } from "./db";
 import type { Lead, Profile } from "./types";
 import { APP_VERSION } from "./version";
 
@@ -26,6 +28,14 @@ function waHref(phone: string, message: string) {
 
 function fillTemplate(template: string, name: string) {
   return template.replaceAll("{name}", name.trim() || "there");
+}
+
+function phoneZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 function labelStatus(status: Lead["status"]) {
@@ -64,6 +74,34 @@ export function AuthScreen() {
       </div>
       <button className="linkish" type="button" onClick={() => book.setPhase("signup")}>
         Create an account
+      </button>
+      <button className="linkish" type="button" onClick={() => book.setPhase("reset")}>
+        Forgot password
+      </button>
+    </section>
+  );
+}
+
+export function ResetScreen() {
+  const book = useBook();
+  const [email, setEmail] = useState("");
+  return (
+    <section className="auth">
+      <p className="wordmark">BPH</p>
+      <h1>Reset password</h1>
+      <p className="lede">We will email a link if this address has an account.</p>
+      <label className="field">
+        <span>Email</span>
+        <input type="email" autoComplete="username" placeholder="you@email.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+      </label>
+      {book.error ? <p className="form-error">{book.error}</p> : null}
+      <div className="form-actions">
+        <button className="primary" type="button" onClick={() => void book.requestPasswordReset(email)}>
+          Send reset link
+        </button>
+      </div>
+      <button className="linkish" type="button" onClick={() => book.setPhase("auth")}>
+        Back to sign in
       </button>
     </section>
   );
@@ -323,10 +361,12 @@ export function LeadsScreen() {
     sold: book.leads.filter((lead) => lead.status === "sold").length,
     lost: book.leads.filter((lead) => lead.status === "lost").length,
   };
+  const [mine, setMine] = useState(false);
   const query = book.query.trim().toLowerCase();
   const rows = book.leads
     .filter((lead) => lead.status === book.segment)
-    .filter((lead) => !query || `${lead.name} ${lead.phone}`.toLowerCase().includes(query))
+    .filter((lead) => !mine || (lead.createdBy || lead.ownerId) === book.me?.id)
+    .filter((lead) => !query || `${lead.name} ${lead.phone} ${lead.notes}`.toLowerCase().includes(query))
     .sort((a, b) => {
       if (book.segment === "lead") {
         if (!a.followUpOn && !b.followUpOn) return a.name.localeCompare(b.name);
@@ -356,11 +396,19 @@ export function LeadsScreen() {
       <input
         className="search"
         type="search"
-        placeholder="Search name or phone"
+        placeholder="Search name, phone, or notes"
         value={book.query}
         autoComplete="off"
         onChange={(event) => book.setQuery(event.target.value)}
       />
+      <div className="chips">
+        <button type="button" className={`chip ${mine ? "" : "on"}`} onClick={() => setMine(false)}>
+          All
+        </button>
+        <button type="button" className={`chip ${mine ? "on" : ""}`} onClick={() => setMine(true)}>
+          Mine
+        </button>
+      </div>
       {rows.length ? (
         <div className="group">
           {rows.map((lead) => {
@@ -391,7 +439,7 @@ export function LeadsScreen() {
       ) : (
         <div className="empty">
           <h2>{emptyTitle}</h2>
-          <p className="meta">{query ? "Try another name or phone number." : "They'll show up here."}</p>
+          <p className="meta">{query ? "Try another name, phone, or note." : mine ? "None of these were added by you." : "They'll show up here."}</p>
         </div>
       )}
     </>
@@ -400,6 +448,8 @@ export function LeadsScreen() {
 
 export function DetailScreen() {
   const book = useBook();
+  const leadId = book.detailId ?? "";
+  const activity = useLiveQuery(() => (leadId ? db.activity.where("leadId").equals(leadId).sortBy("at") : []), [leadId], []) ?? [];
   const lead = book.leads.find((item) => item.id === book.detailId);
   if (!lead || !book.me) {
     return (
@@ -411,6 +461,7 @@ export function DetailScreen() {
   const today = todayISO(book.me.timezone);
   const due = dueMeta(lead.followUpOn, today);
   const adder = ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me);
+  const recent = activity.slice(-8).reverse();
   return (
     <div className="detail">
       <h1>{lead.name}</h1>
@@ -441,10 +492,16 @@ export function DetailScreen() {
         <div className="card-block">
           <p className="detail-phone">{lead.phone}</p>
           <div className="pair">
-            <a className="ghost wide" href={telHref(lead.phone)}>
+            <a className="ghost wide" href={telHref(lead.phone)} onClick={() => book.noteActivity(lead.id, "Called")}>
               Call
             </a>
-            <a className="ghost wide" href={waHref(lead.phone, fillTemplate(book.waTemplate, lead.name))} target="_blank" rel="noopener">
+            <a
+              className="ghost wide"
+              href={waHref(lead.phone, fillTemplate(book.waTemplate, lead.name))}
+              target="_blank"
+              rel="noopener"
+              onClick={() => book.noteActivity(lead.id, "Opened WhatsApp")}
+            >
               WhatsApp
             </a>
           </div>
@@ -454,6 +511,16 @@ export function DetailScreen() {
         <div className="card-block">
           <h2>Notes</h2>
           <p className="notes">{lead.notes}</p>
+        </div>
+      ) : null}
+      {recent.length ? (
+        <div className="card-block">
+          <h2>On this phone</h2>
+          {recent.map((item) => (
+            <p className="meta" key={item.id}>
+              {relativeTime(item.at)} · {item.text}
+            </p>
+          ))}
         </div>
       ) : null}
       <div className="detail-lines">
@@ -603,7 +670,11 @@ export function AccountScreen() {
                   {book.me?.role === "owner" && profile.id !== book.me.id ? (
                     <>
                       {" "}
-                      <button className="text-btn" type="button" onClick={() => void book.removeMember(profile.id)}>
+                      <button className="text-btn" type="button" onClick={() => book.transferOwner(profile.id)}>
+                        Make owner
+                      </button>
+                      {" "}
+                      <button className="text-btn" type="button" onClick={() => book.removeMember(profile.id)}>
                         Remove
                       </button>
                     </>
@@ -677,7 +748,17 @@ export function AccountScreen() {
               </button>
             ))}
           </div>
-          <p className="hint">Pick any time. Add BPH to your home screen so the alert can arrive while the app is closed.</p>
+          <p className="hint">
+            {book.pushReady
+              ? "Add BPH to your home screen so the alert can arrive while the app is closed."
+              : "Alerts show while BPH is open. Closed-app alerts are not set up on this server yet."}
+          </p>
+          <p className="meta">Time zone · {book.me.timezone}</p>
+          {phoneZone() !== book.me.timezone ? (
+            <button className="linkish" type="button" onClick={() => void book.usePhoneZone()}>
+              Use this phone's time zone
+            </button>
+          ) : null}
           <div className="push-preview">
             <div className="push-top">
               <span>BPH</span>
@@ -710,6 +791,14 @@ export function AccountScreen() {
           <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
           <p className="meta">The full book stays on this phone. Changes show up here right away, then reach the rest of the team.</p>
           <p className="meta">{book.leads.length} leads on this phone</p>
+          <button className="linkish" type="button" onClick={book.exportCsv}>
+            Download a backup
+          </button>
+          {book.updateReady ? (
+            <button className="linkish" type="button" onClick={book.applyUpdate}>
+              Update ready
+            </button>
+          ) : null}
         </div>
       </section>
       <section className="part">
