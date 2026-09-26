@@ -50,11 +50,13 @@ create table public.leads (
   sold_amount numeric check (sold_amount is null or sold_amount >= 0),
   lost_reason text,
   source text,
+  tags text[] not null default '{}',
   last_contact_at timestamptz,
   contact_count integer not null default 0,
   history text not null default '',
   constraint follow_up_only_for_leads check (status = 'lead' or follow_up_on is null),
   constraint open_leads_are_not_closed check (status <> 'lead' or closed_on is null),
+  constraint leads_tags_known check (tags <@ array['Scooty', 'Lithium battery', 'Acid battery', 'Parts']::text[]),
   constraint leads_owner_fk foreign key (org_id, owner_id) references public.profiles (org_id, id),
   constraint leads_created_by_fk foreign key (org_id, created_by) references public.profiles (org_id, id),
   constraint leads_updated_by_fk foreign key (org_id, updated_by) references public.profiles (org_id, id)

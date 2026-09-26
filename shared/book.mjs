@@ -168,10 +168,10 @@ export function csvCell(value) {
 }
 
 export function leadsCsv(leads) {
-  const lines = [["Name", "Phone", "Notes", "Status", "Follow-up", "Closed", "Added by", "Updated"].join(",")];
+  const lines = [["Name", "Phone", "Notes", "Status", "Tags", "Follow-up", "Closed", "Added by", "Updated"].join(",")];
   for (const lead of leads) {
     lines.push(
-      [lead.name, lead.phone, lead.notes, lead.status, lead.followUpOn || "", lead.closedOn || "", lead.addedBy || "", lead.updatedAt || ""]
+      [lead.name, lead.phone, lead.notes, lead.status, normalizeTags(lead.tags).join(" · "), lead.followUpOn || "", lead.closedOn || "", lead.addedBy || "", lead.updatedAt || ""]
         .map(csvCell)
         .join(","),
     );
@@ -194,6 +194,24 @@ export function membershipMatches(record, userId, email) {
 
 export const LOST_REASONS = ["Price", "No response", "Bought elsewhere", "Not needed"];
 export const LEAD_SOURCES = ["Walk-in", "Phone", "WhatsApp", "Referral"];
+export const CUSTOMER_TAGS = ["Scooty", "Lithium battery", "Acid battery", "Parts"];
+
+export function normalizeTags(value) {
+  const picked = new Set(Array.isArray(value) ? value : []);
+  return CUSTOMER_TAGS.filter((tag) => picked.has(tag));
+}
+
+export function customerMatches(lead, filter = {}) {
+  if (!lead || lead.deletedAt) return false;
+  const status = filter.status || "all";
+  if (status !== "all" && lead.status !== status) return false;
+  const wanted = normalizeTags(filter.tags);
+  const tags = normalizeTags(lead.tags);
+  if (wanted.length && !wanted.some((tag) => tags.includes(tag))) return false;
+  const query = String(filter.query || "").trim().toLowerCase();
+  if (!query) return true;
+  return `${lead.name || ""} ${lead.phone || ""} ${lead.notes || ""} ${tags.join(" ")}`.toLowerCase().includes(query);
+}
 
 export function followUpResult(kind, today, currentFollowUp) {
   if (kind === "no-answer") return { status: "lead", followUpOn: addDays(today, 1), closedOn: null, label: "No answer" };

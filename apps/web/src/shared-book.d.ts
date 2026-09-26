@@ -61,6 +61,12 @@ declare module "@shared/book.mjs" {
   export function relativeTime(iso: string, now?: number): string;
   export const LOST_REASONS: string[];
   export const LEAD_SOURCES: string[];
+  export const CUSTOMER_TAGS: string[];
+  export function normalizeTags(value: unknown): string[];
+  export function customerMatches(
+    lead: { deletedAt?: string | null; status?: string; name?: string; phone?: string; notes?: string; tags?: unknown },
+    filter?: { status?: string; tags?: unknown; query?: string },
+  ): boolean;
   export function followUpResult(
     kind: string,
     today: string,

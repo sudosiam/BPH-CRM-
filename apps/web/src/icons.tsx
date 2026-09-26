@@ -32,6 +32,17 @@ export function IconLeads() {
   );
 }
 
+export function IconCustomers() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="2.4" />
+      <circle cx="16" cy="9" r="2" />
+      <path d="M3.8 18.5c.8-2.4 2.6-3.6 5.2-3.6s4.4 1.2 5.2 3.6" />
+      <path d="M14 15.1c1.6-.2 3 .5 3.8 2.2" />
+    </svg>
+  );
+}
+
 export function IconYou() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">

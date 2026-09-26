@@ -386,12 +386,14 @@ test("sold amount, source, and the shared message", async () => {
           lostReason: null,
           history: "2026-09-26 · Added",
           contactCount: 1,
+          tags: ["Acid battery", "Nope", "Scooty"],
         },
       },
     });
     assert.equal(pushed.status, 200);
     assert.equal(pushed.data.lead.soldAmount, 1500);
     assert.equal(pushed.data.lead.source, "Walk-in");
+    assert.deepEqual(pushed.data.lead.tags, ["Scooty", "Acid battery"]);
     const template = await json(base, "/api/orgs/template", {
       method: "POST",
       token: owner.data.token,

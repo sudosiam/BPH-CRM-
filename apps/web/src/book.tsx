@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadsCsv, newId, todayISO } from "@shared/book.mjs";
+import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
@@ -10,7 +10,11 @@ import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveM
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
-type Screen = "today" | "leads" | "account" | "member" | "detail" | "edit";
+type Screen = "today" | "leads" | "customers" | "account" | "member" | "detail" | "edit";
+
+function rootOf(stack: Screen[]): "today" | "leads" | "customers" {
+  return stack.find((screen) => screen === "today" || screen === "leads" || screen === "customers") ?? "today";
+}
 type SyncWord = "synced" | "syncing" | "saved";
 
 export type Draft = {
@@ -21,6 +25,7 @@ export type Draft = {
   followUpOn: string | null;
   ownerId: string;
   source: string | null;
+  tags: string[];
 };
 
 type BookValue = {
@@ -54,7 +59,8 @@ type BookValue = {
   setQuery: (query: string) => void;
   setSegment: (segment: Lead["status"]) => void;
   clearError: () => void;
-  goTab: (screen: "today" | "leads") => void;
+  goTab: (screen: "today" | "leads" | "customers") => void;
+  root: "today" | "leads" | "customers";
   openSettings: () => void;
   openLead: (id: string) => void;
   openMember: (id: string) => void;
@@ -157,7 +163,9 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
   const [pushActive, setPushActive] = useState(false);
   const [waTemplate, setWaTemplateState] = useState(readWaTemplate);
-  const leads = (useLiveQuery(() => db.leads.toArray(), [], []) ?? []).filter((lead) => !lead.deletedAt);
+  const leads = (useLiveQuery(() => db.leads.toArray(), [], []) ?? [])
+    .filter((lead) => !lead.deletedAt)
+    .map((lead) => ({ ...lead, tags: normalizeTags(lead.tags) }));
   const profiles = useLiveQuery(() => db.profiles.toArray(), [], []) ?? [];
   const outboxCount = useLiveQuery(() => db.outbox.count(), [], 0) ?? 0;
   const meta = useLiveQuery(() => db.meta.get("local"), []);
@@ -245,10 +253,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
             followUpOn: local.followUpOn,
             ownerId: local.ownerId,
             source: local.source,
+            tags: normalizeTags(local.tags),
           });
           setDetailId(server.id);
           setStack((current) => {
-            const root = current.find((screen) => screen === "today" || screen === "leads") ?? "today";
+            const root = rootOf(current);
             return [root, "edit"];
           });
           setEditorDirty(true);
@@ -540,6 +549,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setError("");
       setPhase(next);
     },
+    root: rootOf(stack),
     setQuery,
     setSegment,
     clearError: () => setError(""),
@@ -549,7 +559,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     openSettings() {
       setStack((current) => {
-        const root = current.find((screen) => screen === "today" || screen === "leads") ?? "today";
+        const root = rootOf(current);
         return [root, "account"];
       });
       setSheet(null);
@@ -741,6 +751,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
             phone: next.phone.trim(),
             notes: next.notes.trim(),
             source: next.source,
+            tags: normalizeTags(next.tags),
             ownerId: current.ownerId,
             updatedBy: me.id,
             updatedAt: new Date().toISOString(),
@@ -767,6 +778,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           soldAmount: null,
           lostReason: null,
           source: next.source,
+          tags: normalizeTags(next.tags),
           lastContactAt: null,
           contactCount: 0,
           history: appendHistory("", todayISO(me.timezone || zone()), "Added"),

@@ -1,3 +1,4 @@
+import { normalizeTags } from "@shared/book.mjs";
 import { db } from "./db";
 import { remote } from "./remote";
 import type { Lead, Org } from "./types";
@@ -118,6 +119,7 @@ export async function flushOutbox(
             closedOn: lead.closedOn,
             soldAmount: lead.soldAmount,
             lostReason: lead.lostReason,
+            tags: normalizeTags(lead.tags),
             deletedAt: lead.deletedAt,
             updatedBy: lead.updatedBy,
           };

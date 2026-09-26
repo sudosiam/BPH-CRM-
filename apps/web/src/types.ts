@@ -19,6 +19,7 @@ export type Lead = {
   soldAmount: number | null;
   lostReason: string | null;
   source: string | null;
+  tags: string[];
   lastContactAt: string | null;
   contactCount: number;
   history: string;

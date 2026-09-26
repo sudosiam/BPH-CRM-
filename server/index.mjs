@@ -17,6 +17,7 @@ import {
   safeTimeZone,
   LOST_REASONS,
   LEAD_SOURCES,
+  normalizeTags,
 } from "../shared/book.mjs";
 
 const scryptAsync = promisify(scrypt);
@@ -127,11 +128,13 @@ export function createBook(dataFile) {
     const soldAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : current?.soldAmount ?? null;
     const lostReason = LOST_REASONS.includes(input.lostReason) ? input.lostReason : input.lostReason == null ? current?.lostReason ?? null : null;
     const source = LEAD_SOURCES.includes(input.source) ? input.source : input.source == null ? current?.source ?? null : null;
+    const tags = input.tags == null ? normalizeTags(current?.tags) : normalizeTags(input.tags);
     const contactCount = Number.isInteger(Number(input.contactCount)) ? Number(input.contactCount) : current?.contactCount || 0;
     return {
       soldAmount,
       lostReason,
       source,
+      tags,
       lastContactAt: input.lastContactAt || current?.lastContactAt || null,
       contactCount,
       history: String(input.history ?? current?.history ?? "").slice(0, 4000),

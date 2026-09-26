@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
+import { addDays, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
@@ -535,6 +535,109 @@ export function LeadsScreen() {
   );
 }
 
+export function CustomersScreen() {
+  const book = useBook();
+  const today = todayISO(book.me?.timezone);
+  const [status, setStatus] = useState<"all" | Lead["status"]>("all");
+  const [tags, setTags] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const rows = book.leads
+    .filter((lead) => customerMatches(lead, { status, tags, query }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const filtering = status !== "all" || tags.length > 0 || query.trim().length > 0;
+  return (
+    <>
+      <input
+        className="search"
+        type="search"
+        placeholder="Search name, phone, or notes"
+        value={query}
+        autoComplete="off"
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      <div className="filter-card">
+        <p className="filter-label">Status</p>
+        <div className="chips">
+          {(["all", "lead", "sold", "lost"] as const).map((item) => (
+            <button key={item} type="button" className={`chip ${status === item ? "on" : ""}`} onClick={() => setStatus(item)}>
+              {item === "all" ? "All" : labelStatus(item)}
+            </button>
+          ))}
+        </div>
+        <p className="filter-label">Tags</p>
+        <div className="chips">
+          {CUSTOMER_TAGS.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className={`chip ${tags.includes(tag) ? "on" : ""}`}
+              onClick={() => setTags((current) => (current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]))}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+        {filtering ? (
+          <button
+            className="linkish filter-clear"
+            type="button"
+            onClick={() => {
+              setStatus("all");
+              setTags([]);
+              setQuery("");
+            }}
+          >
+            Clear filters
+          </button>
+        ) : null}
+      </div>
+      <p className="meta customer-count">
+        {filtering ? `${rows.length} of ${book.leads.length}` : rows.length} {rows.length === 1 && !filtering ? "customer" : "customers"}
+      </p>
+      {rows.length ? (
+        <div className="group">
+          {rows.map((lead) => {
+            const sub =
+              lead.status === "sold"
+                ? `Sold · ${prettyDate(lead.closedOn || today)}`
+                : lead.status === "lost"
+                  ? `Lost · ${prettyDate(lead.closedOn || today)}`
+                  : dueMeta(lead.followUpOn, today).text;
+            const toneClass = lead.status === "lead" ? dueMeta(lead.followUpOn, today).className : "quiet";
+            return (
+              <div className="row" key={lead.id}>
+                <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
+                  <span className="avatar" style={{ background: tone(lead.name) }}>
+                    {initials(lead.name)}
+                  </span>
+                  <span className="row-copy">
+                    <span className="row-name">{lead.name}</span>
+                    <span className={`row-sub ${toneClass}`}>{sub}</span>
+                    {normalizeTags(lead.tags).length ? (
+                      <span className="tag-row">
+                        {normalizeTags(lead.tags).map((tag) => (
+                          <span className="tag" key={tag}>
+                            {tag}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty">
+          <h2>{filtering ? "No customers match" : "No customers yet"}</h2>
+          <p className="meta">{filtering ? "Clear a filter or try another name." : "Everyone you add shows up here."}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function DetailScreen() {
   const book = useBook();
   const leadId = book.detailId ?? "";
@@ -571,6 +674,15 @@ export function DetailScreen() {
               Owner · {adder}
               {lead.source ? ` · ${lead.source}` : ""}
             </p>
+            {normalizeTags(lead.tags).length ? (
+              <div className="tag-row">
+                {normalizeTags(lead.tags).map((tag) => (
+                  <span className="tag" key={tag}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
         {lead.status === "lead" ? (
@@ -731,6 +843,7 @@ export function EditScreen() {
           followUpOn: base.followUpOn,
           ownerId: "ownerId" in base ? base.ownerId : existing?.ownerId || "",
           source: base.source ?? null,
+          tags: normalizeTags("tags" in base ? base.tags : []),
         }
       : {
           id: null,
@@ -740,6 +853,7 @@ export function EditScreen() {
           followUpOn: addDays(today, 1),
           ownerId: book.me?.id || "",
           source: null,
+          tags: [],
         };
   });
   const [formError, setFormError] = useState("");
@@ -765,6 +879,27 @@ export function EditScreen() {
         {LEAD_SOURCES.map((source) => (
           <button key={source} type="button" className={`chip ${draft.source === source ? "on" : ""}`} onClick={() => update({ ...draft, source })}>
             {source}
+          </button>
+        ))}
+      </div>
+      <span className="field">
+        <span>Tags</span>
+      </span>
+      <p className="hint">Optional. Pick what they need.</p>
+      <div className="chips">
+        {CUSTOMER_TAGS.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className={`chip ${draft.tags.includes(tag) ? "on" : ""}`}
+            onClick={() =>
+              update({
+                ...draft,
+                tags: draft.tags.includes(tag) ? draft.tags.filter((item) => item !== tag) : [...draft.tags, tag],
+              })
+            }
+          >
+            {tag}
           </button>
         ))}
       </div>
