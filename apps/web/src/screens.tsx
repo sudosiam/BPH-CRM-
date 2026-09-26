@@ -279,9 +279,7 @@ export function JoinScreen() {
 export function OpeningScreen() {
   return (
     <section className="boot" aria-busy="true">
-      <div className="boot-mark" aria-hidden="true">
-        <span />
-      </div>
+      <img className="boot-logo" src="/logo.png" alt="BPH CRM" />
       <h1>Opening your book</h1>
     </section>
   );
@@ -292,11 +290,7 @@ export function CopyScreen() {
   const failed = book.phase === "copy-error";
   return (
     <section className="boot" aria-busy={!failed}>
-      {failed ? null : (
-        <div className="boot-mark" aria-hidden="true">
-          <span />
-        </div>
-      )}
+      {failed ? null : <img className="boot-logo" src="/logo.png" alt="BPH CRM" />}
       <h1>{failed ? "The copy didn't finish" : "Saving the book on this phone"}</h1>
       {failed ? null : (
         <div className="copy-card">
