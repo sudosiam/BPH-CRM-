@@ -92,6 +92,7 @@ type BookValue = {
   setLostReason: (reason: string) => Promise<void>;
   stampContact: (label: string) => Promise<void>;
   deleteLead: () => Promise<void>;
+  deleteLeads: (ids: string[]) => Promise<void>;
   undoLast: () => Promise<void>;
   setEditorDirty: (dirty: boolean) => void;
   confirmDiscard: () => void;
@@ -1048,6 +1049,29 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (current) {
         offerUndo("Lead deleted", () => restoreLead(current));
       }
+    },
+    async deleteLeads(ids) {
+      if (!me || !ids.length) return;
+      const actor = me.id;
+      const stamp = new Date().toISOString();
+      const snapshots: Lead[] = [];
+      for (const id of ids) {
+        await patchLeadNow(
+          id,
+          (current) => {
+            if (current.deletedAt) return null;
+            snapshots.push({ ...current });
+            return { deletedAt: stamp };
+          },
+          actor,
+        );
+      }
+      if (!snapshots.length) return;
+      scheduleSync();
+      const count = snapshots.length;
+      offerUndo(count === 1 ? "Lead deleted" : `${count} leads deleted`, async () => {
+        for (const snapshot of snapshots) await restoreLead(snapshot);
+      });
     },
     async setReminders(enabled) {
       if (!me) return;
