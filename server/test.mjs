@@ -126,6 +126,40 @@ test("accounts, invite, sync, and conflict", async () => {
     assert.equal(conflict.status, 409);
     assert.equal(conflict.data.lead.status, "sold");
 
+    const removed = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: kept.data.lead.version,
+        lead: { ...kept.data.lead, deletedAt: "2026-09-26T00:00:00.000Z" },
+      },
+    });
+    assert.equal(removed.status, 200);
+    assert.ok(removed.data.lead.deletedAt);
+
+    const staleUndo = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: sold.data.lead.version,
+        lead: { ...removed.data.lead, deletedAt: null },
+      },
+    });
+    assert.equal(staleUndo.status, 409);
+    assert.equal(staleUndo.data.deleted, true);
+
+    const undone = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: removed.data.lead.version,
+        lead: { ...removed.data.lead, deletedAt: null },
+      },
+    });
+    assert.equal(undone.status, 200);
+    assert.equal(undone.data.lead.deletedAt, null);
+    assert.equal(undone.data.lead.name, "Bright Home");
+
     const again = await json(base, "/api/orgs/join", {
       method: "POST",
       token: mate.data.token,

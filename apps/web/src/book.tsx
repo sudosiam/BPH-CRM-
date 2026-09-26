@@ -6,7 +6,7 @@ import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, showTestNotification, subscribeToPush, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
-import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, runFullSync, runIncremental, saveMeta } from "./sync";
+import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, restoreLeadNow, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
@@ -268,27 +268,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }
 
   async function restoreLead(snapshot: Lead) {
-    await patchLeadNow(
-      snapshot.id,
-      () => ({
-        name: snapshot.name,
-        phone: snapshot.phone,
-        notes: snapshot.notes,
-        status: snapshot.status,
-        followUpOn: snapshot.followUpOn,
-        closedOn: snapshot.closedOn,
-        ownerId: snapshot.ownerId,
-        soldAmount: snapshot.soldAmount,
-        lostReason: snapshot.lostReason,
-        source: snapshot.source,
-        tags: snapshot.tags,
-        lastContactAt: snapshot.lastContactAt,
-        contactCount: snapshot.contactCount,
-        history: snapshot.history,
-        deletedAt: null,
-      }),
-      me?.id || snapshot.updatedBy,
-    );
+    await restoreLeadNow(snapshot, me?.id || snapshot.updatedBy);
     scheduleSync();
   }
 

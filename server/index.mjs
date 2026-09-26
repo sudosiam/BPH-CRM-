@@ -895,7 +895,9 @@ export function createBook(dataFile) {
         if (body.baseVersion == null) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: Boolean(existing.deletedAt) } };
         }
-        if (existing.deletedAt) return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+        if (existing.deletedAt && (input.deletedAt || body.baseVersion !== existing.version)) {
+          return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+        }
         if (existing.version !== body.baseVersion) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: false } };
         }
@@ -909,7 +911,7 @@ export function createBook(dataFile) {
         existing.updatedBy = auth.user.id;
         existing.version += 1;
         existing.updatedAt = now;
-        if (input.deletedAt) existing.deletedAt = now;
+        existing.deletedAt = input.deletedAt ? now : null;
         persist();
         return { status: 200, body: { lead: publicLead(existing) }, orgId: auth.org.id };
       });

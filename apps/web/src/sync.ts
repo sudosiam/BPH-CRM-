@@ -239,6 +239,29 @@ export function patchLeadNow(id: string, revise: (current: Lead) => Partial<Lead
   });
 }
 
+/** Puts a deleted lead back, even after sync has removed the local row. */
+export function restoreLeadNow(snapshot: Lead, actorId: string) {
+  return writeStrict([db.leads, db.outbox], async () => {
+    const current = await db.leads.get(snapshot.id);
+    const existing = await db.outbox.get(snapshot.id);
+    const next: Lead = {
+      ...snapshot,
+      deletedAt: null,
+      updatedBy: actorId,
+      updatedAt: new Date().toISOString(),
+      version: current?.version ?? snapshot.version,
+    };
+    await db.leads.put(next);
+    await db.outbox.put({
+      id: snapshot.id,
+      baseVersion: existing ? existing.baseVersion : (current?.version ?? snapshot.version),
+      base: existing?.base ?? leadBase(current ?? snapshot),
+      rev: (existing?.rev ?? 0) + 1,
+    });
+    return true;
+  });
+}
+
 let syncChain: Promise<unknown> = Promise.resolve();
 
 export function enqueueSync<T>(task: () => Promise<T>): Promise<T> {

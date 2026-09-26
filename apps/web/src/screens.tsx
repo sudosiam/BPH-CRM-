@@ -454,16 +454,10 @@ export function TodayScreen() {
           </button>
         </div>
       ) : null}
-      <BulkList ids={[...overdue, ...due, ...later, ...undated].map((lead) => lead.id)} noun="lead">
-        {(select) => (
-          <>
-            <LeadSection title="Overdue" className="overdue" rows={overdue} today={today} select={select} />
-            <LeadSection title="Due today" className="today-due" rows={due} today={today} select={select} />
-            <LeadSection title="Later" className="" rows={later} today={today} select={select} />
-            <LeadSection title="Needs a date" className="" rows={undated} today={today} select={select} />
-          </>
-        )}
-      </BulkList>
+      <LeadSection title="Overdue" className="overdue" rows={overdue} today={today} />
+      <LeadSection title="Due today" className="today-due" rows={due} today={today} />
+      <LeadSection title="Later" className="" rows={later} today={today} />
+      <LeadSection title="Needs a date" className="" rows={undated} today={today} />
       {!overdue.length && !due.length ? (
         <div className="empty">
           <h2>Nothing overdue or due today</h2>
@@ -488,19 +482,7 @@ function compareFollow(a: Lead, b: Lead) {
   return a.name.localeCompare(b.name);
 }
 
-function LeadSection({
-  title,
-  className,
-  rows,
-  today,
-  select,
-}: {
-  title: string;
-  className: string;
-  rows: Lead[];
-  today: string;
-  select: BulkSelect;
-}) {
+function LeadSection({ title, className, rows, today }: { title: string; className: string; rows: Lead[]; today: string }) {
   const book = useBook();
   if (!rows.length) return null;
   return (
@@ -510,16 +492,9 @@ function LeadSection({
         {rows.map((lead) => {
           const due = dueMeta(lead.followUpOn, today);
           const call = telHref(lead.phone);
-          const picked = select.on && select.has(lead.id);
           return (
-            <div className={`row ${picked ? "picked" : ""}`} key={lead.id}>
-              <button
-                className="row-open"
-                type="button"
-                aria-pressed={select.on ? picked : undefined}
-                onClick={() => (select.on ? select.toggle(lead.id) : book.openLead(lead.id))}
-              >
-                {select.on ? <span className={`pick ${picked ? "on" : ""}`} aria-hidden="true" /> : null}
+            <div className="row" key={lead.id}>
+              <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
                 <span className="avatar" style={{ background: tone(lead.name) }}>
                   {initials(lead.name)}
                 </span>
@@ -598,9 +573,7 @@ export function LeadsScreen() {
           Mine
         </button>
       </div>
-      <BulkList key={book.segment} ids={rows.map((lead) => lead.id)} noun="lead">
-        {(select) =>
-          rows.length ? (
+      {rows.length ? (
         <div className="group">
           {rows.map((lead) => {
             const sub =
@@ -609,16 +582,9 @@ export function LeadsScreen() {
                 : lead.status === "lost"
                   ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
                   : { ...dueMeta(lead.followUpOn, today), amount: null };
-            const picked = select.on && select.has(lead.id);
             return (
-              <div className={`row ${picked ? "picked" : ""}`} key={lead.id}>
-                <button
-                  className="row-open"
-                  type="button"
-                  aria-pressed={select.on ? picked : undefined}
-                  onClick={() => (select.on ? select.toggle(lead.id) : book.openLead(lead.id))}
-                >
-                  {select.on ? <span className={`pick ${picked ? "on" : ""}`} aria-hidden="true" /> : null}
+              <div className="row" key={lead.id}>
+                <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
                   <span className="avatar" style={{ background: tone(lead.name) }}>
                     {initials(lead.name)}
                   </span>
@@ -640,13 +606,11 @@ export function LeadsScreen() {
             );
           })}
         </div>
-          ) : (
+      ) : (
         <div className="empty">
           <h2>{emptyTitle}</h2>
         </div>
-          )
-        }
-      </BulkList>
+      )}
     </>
   );
 }
