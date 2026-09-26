@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, followUpResult, normalizeTags, soldThisMonth, quietDays, appendHistory, todayISO } from "./book.mjs";
+import { customerMatches, followUpResult, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(followUpResult("no-answer", "2026-09-26", "2026-09-20").followUpOn, "2026-09-27");
@@ -20,6 +20,11 @@ test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(quietDays("2026-09-01T00:00:00.000Z", "2026-09-26"), 25);
   assert.equal(appendHistory("2026-09-01 · Added", "2026-09-26", "No answer"), "2026-09-01 · Added\n2026-09-26 · No answer");
   assert.equal(todayISO("Not/AZone", new Date("2026-09-26T00:00:00Z")), "2026-09-26");
+  const now = Date.parse("2026-09-26T12:00:00Z");
+  assert.equal(syncStatusLabel("synced", "2026-09-26T12:00:00Z", now), "Synced");
+  assert.equal(syncStatusLabel("synced", "2026-09-26T11:55:00Z", now), "Synced 5m ago");
+  assert.equal(syncStatusLabel("syncing", "2026-09-26T12:00:00Z", now), "Syncing");
+  assert.equal(syncStatusLabel("saved", null, now), "On phone");
   assert.deepEqual(normalizeTags(["Parts", "Nope", "Scooty", "Scooty"]), ["Scooty", "Parts"]);
   const people = [
     { name: "Karim", phone: "900", notes: "", status: "lead", tags: ["Scooty"], deletedAt: null },

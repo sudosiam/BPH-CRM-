@@ -242,6 +242,14 @@ export function soldThisMonth(leads, today) {
   return { count: rows.length, amount };
 }
 
+export function syncStatusLabel(sync, syncedAt, now = Date.now()) {
+  if (sync === "syncing") return "Syncing";
+  if (sync === "saved") return "On phone";
+  if (!syncedAt) return "Synced";
+  const when = relativeTime(syncedAt, now);
+  return when === "Just now" ? "Synced" : `Synced ${when}`;
+}
+
 export function relativeTime(iso, now = Date.now()) {
   const minutes = Math.round((now - new Date(iso).getTime()) / 60000);
   if (minutes < 1) return "Just now";

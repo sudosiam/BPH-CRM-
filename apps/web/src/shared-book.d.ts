@@ -59,6 +59,7 @@ declare module "@shared/book.mjs" {
     email: string,
   ): boolean;
   export function relativeTime(iso: string, now?: number): string;
+  export function syncStatusLabel(sync: "synced" | "syncing" | "saved", syncedAt: string | null, now?: number): string;
   export const LOST_REASONS: string[];
   export const LEAD_SOURCES: string[];
   export const CUSTOMER_TAGS: string[];

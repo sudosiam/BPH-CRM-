@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BookProvider, useBook } from "./book";
 import { IconBack, IconCustomers, IconLeads, IconPlus, IconSettings, IconToday } from "./icons";
-import { digestCounts, relativeTime, todayISO } from "@shared/book.mjs";
+import { digestCounts, syncStatusLabel, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
   AuthScreen,
@@ -64,7 +64,7 @@ function Shell() {
   const showFab = book.screen === "today" || book.screen === "leads" || book.screen === "customers";
   const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
   const badge = dueCounts.today + dueCounts.overdue;
-  const syncLabel = book.sync === "syncing" ? "Syncing" : book.sync === "saved" ? "On phone" : book.syncedAt ? `Synced ${relativeTime(book.syncedAt)}` : "Synced";
+  const syncLabel = syncStatusLabel(book.sync, book.syncedAt);
   const lead = book.leads.find((item) => item.id === book.detailId);
   const [shift, setShift] = useState(0);
   const [dragging, setDragging] = useState(false);
