@@ -706,15 +706,15 @@ export function createBook(dataFile) {
   }
 
   function serveStatic(req, res, url) {
-    if (!existsSync(distDir)) {
-      send(res, 503, { error: "App build is missing. Run npm start from the repo root." });
-      return;
-    }
     let requested = "";
     try {
       requested = decodeURIComponent(url.pathname).replace(/^\/+/, "");
     } catch {
       send(res, 400, { error: "Bad path." });
+      return;
+    }
+    if (!existsSync(distDir)) {
+      send(res, 503, { error: "App build is missing. Run npm start from the repo root." });
       return;
     }
     const filePath = path.resolve(distDir, requested);
