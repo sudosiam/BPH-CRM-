@@ -13,8 +13,8 @@
   --overdue-soft: #f8e8e6;
   --shadow: 0 18px 50px rgba(40, 32, 20, 0.16);
   --font: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
-  /* Max inset stays put while the gesture bar moves, and falls back to the live inset. */
-  --safe-bottom: env(safe-area-max-inset-bottom, env(safe-area-inset-bottom, 0px));
+  /* Whichever inset the phone reports, so lists clear the bar when it sits above the gesture line. */
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), env(safe-area-max-inset-bottom, 0px));
 }
 
 html {
