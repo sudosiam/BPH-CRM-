@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
@@ -615,6 +615,38 @@ export function CustomersScreen() {
   );
 }
 
+function AmountField({ amount, onSave }: { amount: number | null; onSave: (amount: number | null) => void }) {
+  const [text, setText] = useState(amount == null ? "" : String(amount));
+  const focused = useRef(false);
+  useEffect(() => {
+    if (focused.current) return;
+    setText(amount == null ? "" : String(amount));
+  }, [amount]);
+  function commit(raw: string) {
+    const trimmed = raw.trim();
+    onSave(trimmed ? Number(trimmed) : null);
+  }
+  return (
+    <input
+      inputMode="decimal"
+      placeholder="Optional"
+      aria-label="Amount in rupees"
+      value={text}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={() => {
+        focused.current = false;
+        commit(text);
+      }}
+      onChange={(event) => {
+        setText(event.target.value);
+        commit(event.target.value);
+      }}
+    />
+  );
+}
+
 export function DetailScreen() {
   const book = useBook();
   const leadId = book.detailId ?? "";
@@ -736,16 +768,7 @@ export function DetailScreen() {
               <span>Amount</span>
               <div className="money">
                 <IconRupee />
-                <input
-                  inputMode="decimal"
-                  placeholder="Optional"
-                  aria-label="Amount in rupees"
-                  value={lead.soldAmount ?? ""}
-                  onChange={(event) => {
-                    const raw = event.target.value.trim();
-                    void book.setSoldAmount(raw ? Number(raw) : null);
-                  }}
-                />
+                <AmountField amount={lead.soldAmount} onSave={(amount) => void book.setSoldAmount(amount)} />
               </div>
             </label>
           ) : (

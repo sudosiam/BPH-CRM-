@@ -6,7 +6,7 @@ import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, showTestNotification, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
-import { enqueueSync, flushOutbox, flushProfile, queueLead, queueProfile, runFullSync, runIncremental, saveMeta } from "./sync";
+import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
@@ -120,7 +120,55 @@ type BookValue = {
 
 const BookContext = createContext<BookValue | null>(null);
 const WA_KEY = "bph-wa-template";
+const SOLD_KEY = "bph-sold-pending";
+const SYNC_GAP_MS = 15000;
 export const DEFAULT_WA_TEMPLATE = "Hi {name}, this is Biswajit Power Hub. Just following up.";
+
+function waStoreKey(orgId: string | undefined) {
+  return orgId ? `${WA_KEY}:${orgId}` : WA_KEY;
+}
+
+function waDirtyKey(orgId: string) {
+  return `${WA_KEY}:dirty:${orgId}`;
+}
+
+function readPendingSold(): { id: string; amount: number | null } | null {
+  try {
+    const raw = sessionStorage.getItem(SOLD_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { id?: unknown; amount?: unknown };
+    if (typeof parsed.id !== "string" || !parsed.id) return null;
+    if (parsed.amount == null) return { id: parsed.id, amount: null };
+    if (typeof parsed.amount !== "number" || !Number.isFinite(parsed.amount)) return null;
+    return { id: parsed.id, amount: parsed.amount };
+  } catch {
+    return null;
+  }
+}
+
+function rememberSold(id: string, amount: number | null) {
+  try {
+    sessionStorage.setItem(SOLD_KEY, JSON.stringify({ id, amount }));
+  } catch {
+    /* The amount is still written on a short timer and when the phone sleeps. */
+  }
+}
+
+function forgetSold() {
+  try {
+    sessionStorage.removeItem(SOLD_KEY);
+  } catch {
+    /* The amount is already in the book, or storage is blocked. */
+  }
+}
+
+function afterPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      window.setTimeout(resolve, 0);
+    });
+  });
+}
 
 function readWaTemplate() {
   try {
@@ -157,6 +205,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const testAlertBusy = useRef(false);
   const waSave = useRef(0);
   const waDirty = useRef(false);
+  const waPending = useRef<string | null>(null);
+  const lastSyncAt = useRef(0);
+  const syncTimer = useRef(0);
+  const soldTimer = useRef(0);
+  const soldSeq = useRef(0);
+  const soldPending = useRef<{ id: string; amount: number | null; seq: number } | null>(null);
+  const hideFlushAt = useRef(0);
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -183,6 +238,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const me = profiles.find((profile) => profile.id === userId && !profile.removedAt) ?? null;
   const org = meta?.org ?? null;
   const screen = stack.at(-1) ?? "today";
+  const detailIdRef = useRef(detailId);
+  const meRef = useRef(me);
+  const orgRef = useRef(org);
+  detailIdRef.current = detailId;
+  meRef.current = me;
+  orgRef.current = org;
 
   function showToast(text: string) {
     setToast(text);
@@ -201,18 +262,28 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }
 
   async function restoreLead(snapshot: Lead) {
-    const latest = await db.leads.get(snapshot.id);
-    const pending = await db.outbox.get(snapshot.id);
-    await queueLead(
-      {
-        ...snapshot,
+    await patchLeadNow(
+      snapshot.id,
+      () => ({
+        name: snapshot.name,
+        phone: snapshot.phone,
+        notes: snapshot.notes,
+        status: snapshot.status,
+        followUpOn: snapshot.followUpOn,
+        closedOn: snapshot.closedOn,
+        ownerId: snapshot.ownerId,
+        soldAmount: snapshot.soldAmount,
+        lostReason: snapshot.lostReason,
+        source: snapshot.source,
+        tags: snapshot.tags,
+        lastContactAt: snapshot.lastContactAt,
+        contactCount: snapshot.contactCount,
+        history: snapshot.history,
         deletedAt: null,
-        updatedBy: me?.id || snapshot.updatedBy,
-        updatedAt: new Date().toISOString(),
-      },
-      pending ? pending.baseVersion : (latest?.version ?? snapshot.version),
+      }),
+      me?.id || snapshot.updatedBy,
     );
-    void syncNow();
+    scheduleSync();
   }
 
   async function tokenFor(accountUserId: string, accountEmail: string, nextOrg: Org | null, flags?: { fullSyncComplete?: boolean; cursor?: string | null }) {
@@ -247,16 +318,24 @@ export function BookProvider({ children }: { children: ReactNode }) {
     });
   }
 
-  function syncNow() {
+  function syncNow(opts?: { force?: boolean }) {
     return enqueueSync(async () => {
-      setSyncing(true);
+      if (document.hidden && !opts?.force) return;
+      const metaRow = await db.meta.get("local");
+      const pending = await db.outbox.count();
+      const profileDirty = Boolean(metaRow?.profilePending && Object.keys(metaRow.profilePending).length);
+      const recent = lastSyncAt.current > 0 && Date.now() - lastSyncAt.current < SYNC_GAP_MS;
+      if (pending === 0 && !profileDirty && recent) return;
+      if (!navigator.onLine) {
+        setHeld(true);
+        return;
+      }
+      const pull = !recent || !opts?.force;
+      let marked = false;
       try {
-        if (!navigator.onLine) {
-          setHeld(true);
-          return;
-        }
-        const meta = await db.meta.get("local");
-        if (meta && !meta.fullSyncComplete) await runFullSync();
+        marked = true;
+        setSyncing(true);
+        if (metaRow && !metaRow.fullSyncComplete) await runFullSync();
         await flushOutbox(showToast, (local, server) => {
           setConflictDraft({
             id: server.id,
@@ -275,16 +354,24 @@ export function BookProvider({ children }: { children: ReactNode }) {
           });
           setEditorDirty(true);
         });
-        await runIncremental();
+        if (pull) await runIncremental();
         await flushProfile();
         setHeld(false);
         setSyncedAt(new Date().toISOString());
+        lastSyncAt.current = Date.now();
       } catch {
         setHeld(true);
       } finally {
-        setSyncing(false);
+        if (marked) setSyncing(false);
       }
     });
+  }
+
+  function scheduleSync() {
+    window.clearTimeout(syncTimer.current);
+    syncTimer.current = window.setTimeout(() => {
+      void syncNow({ force: true });
+    }, 500);
   }
 
   async function clearPhoneCopy() {
@@ -394,19 +481,24 @@ export function BookProvider({ children }: { children: ReactNode }) {
     let cancel = false;
     let opened = false;
     (async () => {
-      const saved = await db.meta.get("local");
-      if (!usingSupabase) setHttpToken(saved?.token ?? "");
+      let recovering = false;
       try {
-        if (await remote.passwordRecovery()) {
-          if (!cancel) setPhase("password");
-          return;
-        }
+        recovering = await remote.passwordRecovery();
       } catch {
-        /* Open the saved book if the reset link cannot be read. */
+        recovering = false;
       }
-      const profiles = await db.profiles.toArray();
-      const leadCount = await db.leads.count();
-      opened = await keepSavedBook(saved, profiles, leadCount);
+      if (cancel) return;
+      if (recovering) {
+        setPhase("password");
+        return;
+      }
+      const [saved, profileRows, leadCount] = await Promise.all([
+        db.meta.get("local"),
+        db.profiles.toArray(),
+        db.leads.count(),
+      ]);
+      if (!usingSupabase) setHttpToken(saved?.token ?? "");
+      opened = await keepSavedBook(saved, profileRows, leadCount);
       if (cancel) return;
       if (opened && saved) {
         setUserId(saved.userId);
@@ -414,21 +506,27 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setHeld(true);
         setPhase("app");
       }
+      await afterPaint();
+      if (cancel) return;
+      if (opened && saved) {
+        const pendingSold = readPendingSold();
+        if (pendingSold) {
+          void patchLeadNow(pendingSold.id, () => ({ soldAmount: pendingSold.amount }), saved.userId).then((savedLead) => {
+            if (savedLead) forgetSold();
+          });
+        }
+      }
       let account: Account | null = null;
       try {
         account = await remote.session();
       } catch {
-        if (cancel || opened) {
-          if (opened) setHeld(true);
-          return;
-        }
-        setPhase("auth");
+        if (opened) setHeld(true);
+        else setPhase("auth");
         return;
       }
       if (cancel) return;
       if (!account) {
-        if (opened) return;
-        setPhase("auth");
+        if (!opened) setPhase("auth");
         return;
       }
       if (account.removed) {
@@ -452,26 +550,100 @@ export function BookProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function flushSoldNow() {
+    const pending = soldPending.current;
+    const actor = meRef.current?.id;
+    if (!pending || !actor) return Promise.resolve(false);
+    window.clearTimeout(soldTimer.current);
+    soldPending.current = null;
+    const seq = pending.seq;
+    commitSoldDurable(pending.id, pending.amount, actor);
+    return patchLeadNow(
+      pending.id,
+      () => {
+        if (seq !== soldSeq.current) return null;
+        return { soldAmount: pending.amount };
+      },
+      actor,
+    ).then((saved) => {
+      if (saved && seq === soldSeq.current) forgetSold();
+    });
+  }
+
+  function flushWaNow() {
+    const next = waPending.current;
+    const currentOrg = orgRef.current;
+    if (next == null || !currentOrg?.id || meRef.current?.role !== "owner") return;
+    window.clearTimeout(waSave.current);
+    void remote.setWaTemplate(next).then(async (saved) => {
+      const current = await db.meta.get("local");
+      if (current?.org) await db.meta.put({ ...current, org: { ...current.org, waTemplate: saved } });
+      setWaTemplateState((typing) => {
+        if (typing === saved) {
+          waDirty.current = false;
+          waPending.current = null;
+          try {
+            localStorage.removeItem(waDirtyKey(currentOrg.id));
+          } catch {
+            /* The message is already stored on this phone. */
+          }
+        }
+        return typing;
+      });
+    }).catch(() => {
+      /* Kept on this phone. The next open sends it again. */
+    });
+  }
+
+  function flushHidden() {
+    const now = Date.now();
+    if (now - hideFlushAt.current < 1000) return;
+    hideFlushAt.current = now;
+    const sold = flushSoldNow();
+    flushWaNow();
+    window.clearTimeout(syncTimer.current);
+    void sold.then(() => {
+      if (navigator.onLine) void syncNow({ force: true });
+    });
+  }
+
   useEffect(() => {
     if (phase !== "app") return;
+    const storage = navigator.storage;
+    if (storage?.persist) void storage.persist().catch(() => undefined);
     const stop = remote.subscribe(() => {
+      if (document.hidden) return;
       void syncNow();
     });
     const onOnline = () => {
       if (!navigator.onLine) return;
       setOnline(true);
-      void syncNow();
+      if (!document.hidden) void syncNow();
     };
     const onOffline = () => setOnline(false);
+    const onHide = () => flushHidden();
+    const onVisible = () => {
+      if (document.visibilityState === "hidden") onHide();
+      else void syncNow();
+    };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     window.addEventListener("focus", onOnline);
-    const poll = window.setInterval(() => void syncNow(), 30000);
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("freeze", onHide);
+    document.addEventListener("visibilitychange", onVisible);
+    const poll = window.setInterval(() => {
+      if (document.hidden) return;
+      void syncNow();
+    }, 30000);
     return () => {
       stop();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("focus", onOnline);
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("freeze", onHide);
+      document.removeEventListener("visibilitychange", onVisible);
       window.clearInterval(poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -507,17 +679,33 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }, [leads, me, phase, pushActive]);
 
   useEffect(() => {
-    if (!org?.id || waDirty.current) return;
+    if (!org?.id) return;
+    if (waDirty.current) {
+      if (waPending.current && me?.role === "owner") void flushWaNow();
+      return;
+    }
+    let stored: string | null = null;
+    let dirty = false;
+    try {
+      stored = localStorage.getItem(waStoreKey(org.id));
+      dirty = localStorage.getItem(waDirtyKey(org.id)) === "1";
+    } catch {
+      stored = null;
+    }
+    if (dirty && stored != null) {
+      waDirty.current = true;
+      waPending.current = stored;
+      setWaTemplateState(stored);
+      if (me?.role === "owner") void flushWaNow();
+      return;
+    }
     if (org.waTemplate) {
       setWaTemplateState(org.waTemplate);
       return;
     }
-    try {
-      setWaTemplateState(localStorage.getItem(`${WA_KEY}:${org.id}`) ?? DEFAULT_WA_TEMPLATE);
-    } catch {
-      setWaTemplateState(DEFAULT_WA_TEMPLATE);
-    }
-  }, [org?.id, org?.waTemplate]);
+    setWaTemplateState(stored ?? DEFAULT_WA_TEMPLATE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org?.id, org?.waTemplate, me?.role]);
 
   useEffect(() => {
     void remote.vapidPublicKey().then((key) => setPushReady(Boolean(key))).catch(() => setPushReady(false));
@@ -527,10 +715,9 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function changeLead(patch: Partial<Lead>) {
-    const current = detailId ? await db.leads.get(detailId) : null;
-    if (!current || !me) return;
-    await queueLead({ ...current, ...patch, updatedBy: me.id, updatedAt: new Date().toISOString() }, current.version);
-    void syncNow();
+    if (!detailId || !me) return;
+    await patchLeadNow(detailId, () => patch, me.id);
+    scheduleSync();
   }
 
   const value: BookValue = {
@@ -753,25 +940,23 @@ export function BookProvider({ children }: { children: ReactNode }) {
         }
       }
       if (next.id) {
-        const current = await db.leads.get(next.id);
-        if (!current) return;
-        await queueLead(
-          {
-            ...current,
+        const id = next.id;
+        const saved = await patchLeadNow(
+          id,
+          (current) => ({
             name,
             phone: next.phone.trim(),
             notes: next.notes.trim(),
             source: next.source,
             tags: normalizeTags(next.tags),
             ownerId: current.ownerId,
-            updatedBy: me.id,
-            updatedAt: new Date().toISOString(),
-          },
-          current.version,
+          }),
+          me.id,
         );
+        if (!saved) return;
         showToast("Saved");
         setEditorDirty(false);
-        void logActivity(current.id, "Edited");
+        void logActivity(id, "Edited");
         setStack((current) => current.slice(0, -1));
       } else {
         const lead: Lead = {
@@ -805,7 +990,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setStack((current) => [current[0] ?? "today", "detail"]);
         showToast("Lead saved");
       }
-      void syncNow();
+      scheduleSync();
     },
     async setStatus(status) {
       const current = detailId ? await db.leads.get(detailId) : null;
@@ -848,13 +1033,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
       }
       await queueProfile(me.id, { notifyEnabled: enabled });
       showToast(enabled ? "Reminders on" : "Reminders off");
-      void syncNow();
+      scheduleSync();
     },
     async setReminderTime(minute) {
       if (!me) return;
       const next = Math.max(0, Math.min(1439, Math.round(minute)));
       await queueProfile(me.id, { notifyMinute: next });
-      void syncNow();
+      scheduleSync();
     },
     async sendTestAlert() {
       if (testAlertBusy.current) return;
@@ -875,24 +1060,37 @@ export function BookProvider({ children }: { children: ReactNode }) {
     setWaTemplate(value) {
       const next = value.slice(0, 500);
       waDirty.current = true;
+      waPending.current = next;
       setWaTemplateState(next);
+      const orgId = org?.id;
       try {
-        localStorage.setItem(org?.id ? `${WA_KEY}:${org.id}` : WA_KEY, next);
+        localStorage.setItem(waStoreKey(orgId), next);
+        if (orgId) localStorage.setItem(waDirtyKey(orgId), "1");
       } catch {
         /* Private browsing can block storage. The template still applies until refresh. */
       }
-      if (me?.role !== "owner") return;
+      if (me?.role !== "owner" || !orgId) return;
       window.clearTimeout(waSave.current);
       waSave.current = window.setTimeout(() => {
         void remote.setWaTemplate(next).then(async (saved) => {
           const current = await db.meta.get("local");
           if (current?.org) await db.meta.put({ ...current, org: { ...current.org, waTemplate: saved } });
           setWaTemplateState((typing) => {
-            if (typing === saved) waDirty.current = false;
+            if (typing === saved) {
+              waDirty.current = false;
+              waPending.current = null;
+              try {
+                localStorage.removeItem(waDirtyKey(orgId));
+              } catch {
+                /* The saved message is already on this phone. */
+              }
+            }
             return typing;
           });
-        }).catch(() => {});
-      }, 400);
+        }).catch(() => {
+          /* Kept on this phone. The next open sends it again. */
+        });
+      }, 500);
     },
     regenerateCode() {
       setSheet("code");
@@ -921,7 +1119,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setSheet(null);
         setPendingMemberId(null);
         showToast("Removed from the team");
-        void syncNow();
+        scheduleSync();
       } catch (reason) {
         showToast(actionError(reason, "Could not remove them."));
       }
@@ -941,7 +1139,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setSheet(null);
         setPendingMemberId(null);
         showToast("They are the owner now");
-        void syncNow();
+        scheduleSync();
       } catch (reason) {
         showToast(actionError(reason, "Could not transfer the business."));
       }
@@ -956,7 +1154,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (!me) return;
       await queueProfile(me.id, { timezone: zone() });
       showToast("Time zone saved");
-      void syncNow();
+      scheduleSync();
     },
     exportCsv() {
       const names = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
@@ -1011,32 +1209,57 @@ export function BookProvider({ children }: { children: ReactNode }) {
       }
     },
     async recordResult(kind) {
-      const current = detailId ? await db.leads.get(detailId) : null;
-      if (!current || !me) return;
+      if (!detailId || !me) return;
+      const id = detailId;
+      const actor = me.id;
       const today = todayISO(me.timezone || zone());
-      const result = followUpResult(kind, today, current.followUpOn);
-      if (!result) return;
-      await queueLead(
-        {
-          ...current,
-          status: result.status,
-          followUpOn: result.followUpOn,
-          closedOn: result.closedOn,
-          lastContactAt: new Date().toISOString(),
-          contactCount: (current.contactCount || 0) + 1,
-          history: appendHistory(current.history, today, result.label),
-          updatedBy: me.id,
-          updatedAt: new Date().toISOString(),
+      let label = "";
+      const saved = await patchLeadNow(
+        id,
+        (current) => {
+          const result = followUpResult(kind, today, current.followUpOn);
+          if (!result) return null;
+          label = result.label;
+          return {
+            status: result.status,
+            followUpOn: result.followUpOn,
+            closedOn: result.closedOn,
+            lastContactAt: new Date().toISOString(),
+            contactCount: (current.contactCount || 0) + 1,
+            history: appendHistory(current.history, today, result.label),
+          };
         },
-        current.version,
+        actor,
       );
-      void logActivity(current.id, result.label);
-      showToast(result.label);
-      void syncNow();
+      if (!saved || !label) return;
+      void logActivity(id, label);
+      showToast(label);
+      scheduleSync();
     },
     async setSoldAmount(amount) {
       if (amount != null && !Number.isFinite(amount)) return;
-      await changeLead({ soldAmount: amount });
+      const id = detailIdRef.current;
+      const actor = meRef.current?.id;
+      if (!id || !actor) return;
+      const seq = ++soldSeq.current;
+      soldPending.current = { id, amount, seq };
+      rememberSold(id, amount);
+      window.clearTimeout(soldTimer.current);
+      soldTimer.current = window.setTimeout(() => {
+        if (seq !== soldSeq.current) return;
+        soldPending.current = null;
+        void patchLeadNow(
+          id,
+          () => {
+            if (seq !== soldSeq.current) return null;
+            return { soldAmount: amount };
+          },
+          actor,
+        ).then((saved) => {
+          if (saved && seq === soldSeq.current) forgetSold();
+          if (seq === soldSeq.current) scheduleSync();
+        });
+      }, 250);
     },
     async setLostReason(reason) {
       const today = todayISO(me?.timezone || zone());
@@ -1047,22 +1270,22 @@ export function BookProvider({ children }: { children: ReactNode }) {
       });
     },
     async stampContact(label) {
-      const current = detailId ? await db.leads.get(detailId) : null;
-      if (!current || !me) return;
+      if (!detailId || !me) return;
+      const id = detailId;
+      const actor = me.id;
       const today = todayISO(me.timezone || zone());
-      await queueLead(
-        {
-          ...current,
+      const saved = await patchLeadNow(
+        id,
+        (current) => ({
           lastContactAt: new Date().toISOString(),
           contactCount: (current.contactCount || 0) + 1,
           history: appendHistory(current.history, today, label),
-          updatedBy: me.id,
-          updatedAt: new Date().toISOString(),
-        },
-        current.version,
+        }),
+        actor,
       );
-      void logActivity(current.id, label);
-      void syncNow();
+      if (!saved) return;
+      void logActivity(id, label);
+      scheduleSync();
     },
     async undoLast() {
       const run = undoRun;
@@ -1097,24 +1320,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
     },
     noteActivity(leadId, text) {
       void logActivity(leadId, text);
-      const currentId = leadId;
-      void (async () => {
-        const current = await db.leads.get(currentId);
-        if (!current || !me) return;
-        const today = todayISO(me.timezone || zone());
-        await queueLead(
-          {
-            ...current,
-            lastContactAt: new Date().toISOString(),
-            contactCount: (current.contactCount || 0) + 1,
-            history: appendHistory(current.history, today, text),
-            updatedBy: me.id,
-            updatedAt: new Date().toISOString(),
-          },
-          current.version,
-        );
-        void syncNow();
-      })();
+      const actor = me?.id;
+      if (!actor) return;
+      const today = todayISO(me?.timezone || zone());
+      void patchLeadNow(
+        leadId,
+        (current) => ({
+          lastContactAt: new Date().toISOString(),
+          contactCount: (current.contactCount || 0) + 1,
+          history: appendHistory(current.history, today, text),
+        }),
+        actor,
+      ).then(() => scheduleSync());
     },
     applyUpdate() {
       window.dispatchEvent(new Event("bph-apply-update"));

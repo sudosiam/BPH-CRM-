@@ -181,10 +181,12 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
 }
 
 export function createSupabaseRemote() {
+  const initialHash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const initialQuery = new URLSearchParams(window.location.search);
+  let recovery = initialHash.get("type") === "recovery" || initialQuery.get("type") === "recovery";
   const supabase = createClient(resolveSupabaseUrl(import.meta.env.VITE_SUPABASE_URL), import.meta.env.VITE_SUPABASE_ANON_KEY || "", {
     auth: { persistSession: true, autoRefreshToken: true },
   });
-  let recovery = false;
   supabase.auth.onAuthStateChange((event) => {
     if (event === "PASSWORD_RECOVERY") recovery = true;
   });
@@ -267,10 +269,10 @@ export function createSupabaseRemote() {
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const query = new URLSearchParams(window.location.search);
       const inUrl = hash.get("type") === "recovery" || query.get("type") === "recovery";
+      if (!inUrl && !recovery) return false;
       await supabase.auth.getSession();
-      const pending = recovery || inUrl;
-      if (pending) window.history.replaceState(null, "", window.location.pathname);
-      return pending;
+      window.history.replaceState(null, "", window.location.pathname);
+      return true;
     },
     async updatePassword(password: string) {
       const { error } = await supabase.auth.updateUser({ password });

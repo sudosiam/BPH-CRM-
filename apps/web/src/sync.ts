@@ -10,8 +10,8 @@ export type ProfilePatch = {
 };
 
 export async function applyPull(payload: Awaited<ReturnType<typeof remote.pull>>, replaceAll: boolean) {
-  const pending = new Set((await db.outbox.toArray()).map((item) => item.id));
-  await db.transaction("rw", db.leads, db.profiles, db.meta, async () => {
+  await db.transaction("rw", db.leads, db.profiles, db.meta, db.outbox, async () => {
+    const pending = new Set((await db.outbox.toArray()).map((item) => item.id));
     if (replaceAll) {
       const local = await db.leads.toArray();
       const remoteIds = new Set(payload.leads.map((lead) => lead.id));
@@ -56,13 +56,15 @@ export async function runIncremental() {
 }
 
 export async function queueProfile(userId: string, patch: ProfilePatch) {
-  const profile = await db.profiles.get(userId);
-  if (profile) await db.profiles.put({ ...profile, ...patch });
-  const current = await db.meta.get("local");
-  if (!current) return;
-  await db.meta.put({
-    ...current,
-    profilePending: { ...(current.profilePending ?? {}), ...patch },
+  await writeStrict([db.profiles, db.meta], async () => {
+    const profile = await db.profiles.get(userId);
+    if (profile) await db.profiles.put({ ...profile, ...patch });
+    const current = await db.meta.get("local");
+    if (!current) return;
+    await db.meta.put({
+      ...current,
+      profilePending: { ...(current.profilePending ?? {}), ...patch },
+    });
   });
 }
 
@@ -94,13 +96,124 @@ export async function flushProfile() {
   if (row && latest.profilePending) await db.profiles.put({ ...saved, ...latest.profilePending });
 }
 
-export async function queueLead(next: Lead, baseVersion: number | null) {
-  const existing = await db.outbox.get(next.id);
-  await db.leads.put(next);
-  await db.outbox.put({
-    id: next.id,
-    baseVersion: existing ? existing.baseVersion : baseVersion,
-    rev: (existing?.rev ?? 0) + 1,
+type Durability = "default" | "strict" | "relaxed";
+
+let allowStrict = true;
+let strictDepth = 0;
+let savedDurability: Durability | undefined;
+
+function durabilityOptions() {
+  return (db as unknown as { _options: { chromeTransactionDurability?: Durability } })._options;
+}
+
+function beginStrict() {
+  if (!allowStrict) return;
+  const options = durabilityOptions();
+  if (strictDepth === 0) savedDurability = options.chromeTransactionDurability;
+  strictDepth += 1;
+  options.chromeTransactionDurability = "strict";
+}
+
+function endStrict() {
+  strictDepth = Math.max(0, strictDepth - 1);
+  if (strictDepth === 0) durabilityOptions().chromeTransactionDurability = savedDurability;
+}
+
+function isDurabilityError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /durability/i.test(message);
+}
+
+function writeStrict<T>(
+  tables: [typeof db.leads, typeof db.outbox] | [typeof db.profiles, typeof db.meta],
+  scope: () => Promise<T> | T,
+): Promise<T> {
+  const start = (strict: boolean) => {
+    if (strict) beginStrict();
+    try {
+      const pending = db.transaction("rw", tables[0], tables[1], scope);
+      return pending.finally(() => {
+        if (strict) endStrict();
+      });
+    } catch (error) {
+      if (strict) endStrict();
+      throw error;
+    }
+  };
+  if (!allowStrict) return start(false);
+  return start(true).catch((error: unknown) => {
+    if (!isDurabilityError(error)) throw error;
+    allowStrict = false;
+    return start(false);
+  });
+}
+
+export function queueLead(next: Lead, baseVersion: number | null) {
+  return writeStrict([db.leads, db.outbox], async () => {
+    const existing = await db.outbox.get(next.id);
+    await db.leads.put(next);
+    await db.outbox.put({
+      id: next.id,
+      baseVersion: existing ? existing.baseVersion : baseVersion,
+      rev: (existing?.rev ?? 0) + 1,
+    });
+  });
+}
+
+/** Writes the sold amount with a native transaction started in the same turn as pagehide, before the phone can freeze Dexie's microtask. */
+export function commitSoldDurable(id: string, amount: number | null, actorId: string) {
+  const idb = db.backendDB();
+  if (!idb) return;
+  let tx: IDBTransaction;
+  try {
+    tx = idb.transaction(["leads", "outbox"], "readwrite", { durability: "strict" });
+  } catch {
+    try {
+      tx = idb.transaction(["leads", "outbox"], "readwrite");
+    } catch {
+      return;
+    }
+  }
+  const leads = tx.objectStore("leads");
+  const outbox = tx.objectStore("outbox");
+  const row = leads.get(id);
+  row.onsuccess = () => {
+    const current = row.result as Lead | undefined;
+    if (!current) return;
+    leads.put({ ...current, soldAmount: amount, updatedBy: actorId, updatedAt: new Date().toISOString() });
+    const queued = outbox.get(id);
+    queued.onsuccess = () => {
+      const existing = queued.result as { baseVersion: number | null; rev?: number } | undefined;
+      outbox.put({
+        id,
+        baseVersion: existing ? existing.baseVersion : current.version,
+        rev: (existing?.rev ?? 0) + 1,
+      });
+    };
+  };
+}
+
+/** Applies a patch inside one durable transaction. */
+export function patchLeadNow(id: string, revise: (current: Lead) => Partial<Lead> | null, actorId: string) {
+  return writeStrict([db.leads, db.outbox], async () => {
+    const current = await db.leads.get(id);
+    if (!current) return false;
+    const patch = revise(current);
+    if (!patch) return false;
+    const existing = await db.outbox.get(id);
+    const next: Lead = {
+      ...current,
+      ...patch,
+      updatedBy: actorId,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.leads.put(next);
+    await db.outbox.put({
+      id,
+      baseVersion: existing ? existing.baseVersion : current.version,
+      rev: (existing?.rev ?? 0) + 1,
+    });
+    return true;
   });
 }
 
