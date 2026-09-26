@@ -4,7 +4,7 @@ import { addDays, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestL
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
-import { IconRupee } from "./icons";
+import { IconChat, IconDownload, IconRupee } from "./icons";
 import { APP_VERSION } from "./version";
 
 const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
@@ -942,30 +942,28 @@ export function AccountScreen() {
   const org = book.org;
   const today = todayISO(me.timezone);
   const code = org.inviteCode;
-  const preview = fillTemplate(book.waTemplate, "Customer");
+  const sold = soldThisMonth(book.leads, today);
   return (
     <div className="settings">
-      <section className="part">
-        <p className="part-label">You</p>
-        <button className="card-block settings-hero member-open" type="button" onClick={() => book.openMember(me.id)}>
-          <span className="avatar settings-avatar round" style={{ background: tone(me.displayName) }}>
-            {initials(me.displayName)}
-          </span>
-          <div>
-            <h2>{me.displayName}</h2>
-            <p className="meta">
-              {me.role === "owner" ? "Owner" : "Member"} · {org.name}
-            </p>
-            {book.email ? <p className="meta">{book.email}</p> : null}
-            <p className="meta">
-              This month: {soldThisMonth(book.leads, today).count} sold · {rupees(soldThisMonth(book.leads, today).amount)}
-            </p>
-          </div>
-        </button>
-      </section>
+      <button className="card-block settings-hero member-open" type="button" onClick={() => book.openMember(me.id)}>
+        <span className="avatar" style={{ background: tone(me.displayName) }}>
+          {initials(me.displayName)}
+        </span>
+        <div className="settings-id">
+          <h2>{me.displayName}</h2>
+          <p className="meta">
+            {me.role === "owner" ? "Owner" : "Member"} · {org.name}
+          </p>
+          {book.email ? <p className="meta">{book.email}</p> : null}
+          <p className="meta">
+            {sold.count} sold this month · {rupees(sold.amount)}
+          </p>
+        </div>
+        <span className="chevron" aria-hidden="true" />
+      </button>
       <section className="part">
         <p className="part-label">Team</p>
-        <div className="card-block">
+        <div className="card-block team-card">
           <div className="team-scroll">
             {teamMembers(book.profiles, me.id).map((profile) => (
               <button className="team-person" key={profile.id} type="button" onClick={() => book.openMember(profile.id)}>
@@ -1008,46 +1006,65 @@ export function AccountScreen() {
           ) : null}
         </div>
       </section>
-      <section className="part">
-        <p className="part-label">WhatsApp</p>
-        <div className="card-block">
-          <h2>Message template</h2>
-          <label className="field">
-            <span>Template</span>
-            <textarea
-              maxLength={500}
-              value={book.waTemplate}
-              onChange={(event) => book.setWaTemplate(event.target.value)}
-            />
-          </label>
-          <p className="hint">Preview: {preview}</p>
-        </div>
-      </section>
-      <section className="part">
-        <p className="part-label">This phone</p>
-        <div className="card-block">
+      <div className="menu-card">
+        <button className="menu-row" type="button" onClick={book.openMessage}>
+          <span className="menu-mark">
+            <IconChat />
+          </span>
+          <span>WhatsApp Message</span>
+          <span className="chevron" aria-hidden="true" />
+        </button>
+        <button className="menu-row" type="button" onClick={book.exportCsv}>
+          <span className="menu-mark backup">
+            <IconDownload />
+          </span>
+          <span>Download a backup</span>
+        </button>
+        {book.updateReady ? (
+          <button className="menu-row" type="button" onClick={book.applyUpdate}>
+            <span className="menu-mark">
+              <IconDownload />
+            </span>
+            <span>Update ready</span>
+          </button>
+        ) : null}
+      </div>
+      <div className={`card-block status-card ${book.sync}`}>
+        <span className="status-dot" />
+        <div>
           <h2>{book.sync === "syncing" ? "Syncing…" : book.sync === "saved" ? "Saved on this phone" : "Synced"}</h2>
           <p className="meta">{book.leads.length} leads on this phone</p>
-          <button className="linkish" type="button" onClick={book.exportCsv}>
-            Download a backup
-          </button>
-          {book.updateReady ? (
-            <button className="linkish" type="button" onClick={book.applyUpdate}>
-              Update ready
-            </button>
-          ) : null}
         </div>
-      </section>
-      <section className="part">
-        <p className="part-label">About</p>
-        <div className="card-block about-block">
-          <p className="version">Version {APP_VERSION}</p>
-          <p className="meta">Biswajit Power Hub</p>
-        </div>
-        <button className="ghost wide signout" type="button" onClick={() => void book.signOut()}>
+      </div>
+      <div className="settings-foot">
+        <button className="signout-row" type="button" onClick={() => void book.signOut()}>
           Sign out
         </button>
-      </section>
+        <p className="version">Version {APP_VERSION}</p>
+        <p className="meta">Biswajit Power Hub</p>
+      </div>
+    </div>
+  );
+}
+
+export function MessageScreen() {
+  const book = useBook();
+  const preview = fillTemplate(book.waTemplate, "Customer");
+  return (
+    <div className="settings message-screen">
+      <label className="field">
+        <span>Message</span>
+        <textarea
+          maxLength={500}
+          rows={6}
+          value={book.waTemplate}
+          onChange={(event) => book.setWaTemplate(event.target.value)}
+        />
+      </label>
+      <div className="wa-preview">
+        <span>Preview</span>
+        <p>{preview}</p>
+      </div>
     </div>
   );
 }

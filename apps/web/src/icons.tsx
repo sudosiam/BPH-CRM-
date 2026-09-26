@@ -62,6 +62,24 @@ export function IconRupee() {
   );
 }
 
+export function IconChat() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 7.5h14A1.5 1.5 0 0 1 20.5 9v6.5A1.5 1.5 0 0 1 19 17H9l-4 3v-3H5A1.5 1.5 0 0 1 3.5 15.5V9A1.5 1.5 0 0 1 5 7.5Z" />
+    </svg>
+  );
+}
+
+export function IconDownload() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 4.5v10" />
+      <path d="m8 11 4 4 4-4" />
+      <path d="M5 19.5h14" />
+    </svg>
+  );
+}
+
 export function IconSettings() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

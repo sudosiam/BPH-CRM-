@@ -10,7 +10,7 @@ import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveM
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
-type Screen = "today" | "leads" | "customers" | "account" | "member" | "detail" | "edit";
+type Screen = "today" | "leads" | "customers" | "account" | "member" | "message" | "detail" | "edit";
 
 function rootOf(stack: Screen[]): "today" | "leads" | "customers" {
   return stack.find((screen) => screen === "today" || screen === "leads" || screen === "customers") ?? "today";
@@ -62,6 +62,7 @@ type BookValue = {
   goTab: (screen: "today" | "leads" | "customers") => void;
   root: "today" | "leads" | "customers";
   openSettings: () => void;
+  openMessage: () => void;
   openLead: (id: string) => void;
   openMember: (id: string) => void;
   back: () => void;
@@ -562,6 +563,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
         const root = rootOf(current);
         return [root, "account"];
       });
+      setSheet(null);
+    },
+    openMessage() {
+      setStack((current) => [...current, "message"]);
       setSheet(null);
     },
     openLead(id) {
