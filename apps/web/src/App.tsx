@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { BookProvider, useBook } from "./book";
-import { IconBack, IconCustomers, IconLeads, IconPlus, IconSettings, IconToday } from "./icons";
-import { digestCounts, initials, syncStatusLabel, todayISO } from "@shared/book.mjs";
+import { IconBack, IconCustomers, IconLeads, IconPerson, IconPlus, IconSettings, IconToday } from "./icons";
+import { digestCounts, syncStatusLabel, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
   AuthScreen,
@@ -206,7 +206,7 @@ function Shell() {
                   style={{ background: tone(me.displayName) }}
                   onClick={() => book.openMember(me.id)}
                 >
-                  {initials(me.displayName)}
+                  <IconPerson />
                 </button>
               ) : null}
             </div>
