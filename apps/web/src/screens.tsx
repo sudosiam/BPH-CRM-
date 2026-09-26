@@ -108,6 +108,24 @@ export function StartScreen() {
   const book = useBook();
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState(book.me?.displayName || "");
+  if (book.remembered) {
+    return (
+      <section className="auth">
+        <p className="wordmark">BPH</p>
+        <h1>Open {book.remembered.orgName}</h1>
+        <p className="lede">This account is already in that shared book. You do not need a new code.</p>
+        {book.error ? <p className="form-error">{book.error}</p> : null}
+        <div className="form-actions">
+          <button className="primary" type="button" onClick={() => void book.reopenBook()}>
+            Open shared book
+          </button>
+        </div>
+        <button className="linkish" type="button" onClick={() => book.setPhase("join")}>
+          Use a different code
+        </button>
+      </section>
+    );
+  }
   return (
     <section className="auth">
       <p className="wordmark">BPH</p>

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, hasLocalBook, nextCustomerName, todayISO } from "@shared/book.mjs";
 import { db, resetLocal } from "./db";
+import { matchingMembership, readMembership, writeMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
@@ -53,6 +54,8 @@ type BookValue = {
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   createOrg: (name: string, displayName: string) => Promise<void>;
   joinOrg: (code: string, displayName: string) => Promise<void>;
+  remembered: { orgName: string; inviteCode: string | null } | null;
+  reopenBook: () => Promise<void>;
   retryCopy: () => Promise<void>;
   signOut: () => Promise<void>;
   confirmSignOut: () => Promise<void>;
@@ -127,6 +130,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
       fullSyncComplete: flags?.fullSyncComplete,
       cursor: flags?.cursor,
     });
+    if (nextOrg) {
+      const existing = readMembership();
+      writeMembership({
+        userId: accountUserId,
+        email: accountEmail,
+        orgId: nextOrg.id,
+        orgName: nextOrg.name,
+        inviteCode: nextOrg.inviteCode || (existing?.orgId === nextOrg.id ? existing.inviteCode : null),
+      });
+    }
     setUserId(accountUserId);
     setEmail(accountEmail);
   }
@@ -198,16 +211,25 @@ export function BookProvider({ children }: { children: ReactNode }) {
       leadCount,
     });
     if (!ready || !saved || !me) return false;
+    const org = saved.org ?? { id: me.orgId, name: "Your book", inviteCode: null };
     if (!saved.org || !saved.fullSyncComplete) {
       await saveMeta({
         token: saved.token,
         userId: saved.userId,
         email: saved.email,
-        org: saved.org ?? { id: me.orgId, name: "Your book", inviteCode: null },
+        org,
         fullSyncComplete: true,
         cursor: saved.cursor,
       });
     }
+    const existing = readMembership();
+    writeMembership({
+      userId: saved.userId,
+      email: saved.email,
+      orgId: org.id,
+      orgName: org.name,
+      inviteCode: org.inviteCode || (existing?.orgId === org.id ? existing.inviteCode : null),
+    });
     return true;
   }
 
@@ -240,7 +262,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       }
       if (cancel) return;
       if (!account) {
-        if (opened && !navigator.onLine) return;
+        if (opened) return;
         setPhase("auth");
         return;
       }
@@ -389,6 +411,15 @@ export function BookProvider({ children }: { children: ReactNode }) {
         const joined = await remote.joinOrg(code, displayName, zone());
         await db.profiles.put(joined.profile);
         await tokenFor(joined.profile.id, email, joined.org, { fullSyncComplete: false, cursor: null });
+        if (!joined.org.inviteCode) {
+          writeMembership({
+            userId: joined.profile.id,
+            email,
+            orgId: joined.org.id,
+            orgName: joined.org.name,
+            inviteCode: code.trim(),
+          });
+        }
         setPhase("copy");
         try {
           await copyBook();
@@ -399,6 +430,50 @@ export function BookProvider({ children }: { children: ReactNode }) {
         }
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Could not join.");
+      }
+    },
+    remembered: (() => {
+      const match = matchingMembership(userId, email);
+      return match ? { orgName: match.orgName, inviteCode: match.inviteCode } : null;
+    })(),
+    async reopenBook() {
+      setError("");
+      const saved = matchingMembership(userId, email);
+      try {
+        const account = await remote.session();
+        if (account?.profile && account.org) {
+          await openAccount(account, false);
+          return;
+        }
+        if (!saved?.inviteCode) {
+          setError("This account is already in that book. Open it again when you are online.");
+          return;
+        }
+        const joined = await remote.joinOrg(saved.inviteCode, me?.displayName || "Teammate", zone());
+        await db.profiles.put(joined.profile);
+        await tokenFor(joined.profile.id, email || saved.email, joined.org, { fullSyncComplete: false, cursor: null });
+        setPhase("copy");
+        try {
+          await copyBook();
+          setPhase("app");
+          setStack(["today"]);
+        } catch {
+          setPhase("copy-error");
+        }
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : "Could not open the book.";
+        if (/already/i.test(message)) {
+          try {
+            const again = await remote.session();
+            if (again?.profile && again.org) {
+              await openAccount(again, false);
+              return;
+            }
+          } catch {
+            /* The message below explains the next step. */
+          }
+        }
+        setError(message);
       }
     },
     async retryCopy() {

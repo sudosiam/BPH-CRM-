@@ -120,6 +120,14 @@ export function hasLocalBook(input) {
   return !input.hasOrg;
 }
 
+export function membershipMatches(record, userId, email) {
+  if (!record?.orgName || !record?.orgId) return false;
+  if (userId && record.userId === userId) return true;
+  const savedEmail = String(record.email || "").trim().toLowerCase();
+  const nextEmail = String(email || "").trim().toLowerCase();
+  return Boolean(savedEmail && savedEmail === nextEmail);
+}
+
 export function relativeTime(iso, now = Date.now()) {
   const minutes = Math.round((now - new Date(iso).getTime()) / 60000);
   if (minutes < 1) return "Just now";

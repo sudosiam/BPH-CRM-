@@ -30,5 +30,10 @@ declare module "@shared/book.mjs" {
     fullSyncComplete: boolean;
     leadCount: number;
   }): boolean;
+  export function membershipMatches(
+    record: { userId?: string; email?: string; orgId?: string; orgName?: string } | null,
+    userId: string,
+    email: string,
+  ): boolean;
   export function relativeTime(iso: string, now?: number): string;
 }

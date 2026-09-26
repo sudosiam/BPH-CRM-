@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { startServer } from "./index.mjs";
-import { shouldSendDigest, digestCounts, digestLine, nextCustomerName, hasLocalBook } from "../shared/book.mjs";
+import { shouldSendDigest, digestCounts, digestLine, nextCustomerName, hasLocalBook, membershipMatches } from "../shared/book.mjs";
 
 async function boot() {
   const dataFile = path.join(mkdtempSync(path.join(tmpdir(), "bph-")), "book.json");
@@ -179,6 +179,10 @@ test("digest stays quiet until the chosen time and when nothing is due", () => {
   assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: false, fullSyncComplete: false, leadCount: 0 }), true);
   assert.equal(hasLocalBook({ userId: "u", hasProfile: true, hasOrg: true, fullSyncComplete: false, leadCount: 0 }), false);
   assert.equal(hasLocalBook({ userId: "u", hasProfile: false, hasOrg: false, fullSyncComplete: false, leadCount: 2 }), false);
+  assert.equal(membershipMatches({ userId: "u", email: "a@b.c", orgId: "o", orgName: "Hub" }, "u", ""), true);
+  assert.equal(membershipMatches({ userId: "u", email: "a@b.c", orgId: "o", orgName: "Hub" }, "other", "A@B.c"), true);
+  assert.equal(membershipMatches({ userId: "u", email: "a@b.c", orgId: "o", orgName: "Hub" }, "other", "nope@b.c"), false);
+  assert.equal(membershipMatches(null, "u", "a@b.c"), false);
   assert.equal(nextCustomerName([]), "Customer 1");
   assert.equal(nextCustomerName(["Ada", "Customer 2", "Customer 9"]), "Customer 10");
 });

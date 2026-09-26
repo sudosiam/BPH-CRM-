@@ -66,6 +66,31 @@ function toRow(lead: Lead, userId: string) {
   };
 }
 
+async function membershipFromBook(supabase: SupabaseClient, userId: string): Promise<{ profile: Profile; org: Org } | null> {
+  const { data, error } = await supabase.rpc("my_book");
+  if (error || !data || typeof data !== "object") return null;
+  const row = data as Record<string, unknown>;
+  if (!row.org_id) return null;
+  const role = row.role === "owner" ? "owner" : "member";
+  return {
+    profile: {
+      id: userId,
+      orgId: String(row.org_id),
+      displayName: String(row.display_name || "Teammate"),
+      role,
+      timezone: String(row.timezone || "UTC"),
+      notifyEnabled: row.notify_enabled !== false,
+      notifyMinute: Number(row.notify_minute ?? 480),
+      removedAt: null,
+    },
+    org: {
+      id: String(row.org_id),
+      name: String(row.org_name || "Your book"),
+      inviteCode: role === "owner" && row.invite_code ? String(row.invite_code) : null,
+    },
+  };
+}
+
 async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw new Error(error.message);
@@ -74,12 +99,19 @@ async function loadAccount(supabase: SupabaseClient): Promise<Account | null> {
   const profileResult = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
   if (profileResult.error) throw new Error(profileResult.error.message);
   const profileRow = profileResult.data;
-  const profile = profileRow && !profileRow.removed_at ? mapProfile(profileRow) : null;
+  let profile = profileRow && !profileRow.removed_at ? mapProfile(profileRow) : null;
   let org: Org | null = null;
   if (profile) {
     const orgResult = await supabase.from("orgs").select("*").eq("id", profile.orgId).maybeSingle();
     if (orgResult.error) throw new Error(orgResult.error.message);
     org = orgResult.data ? mapOrg(orgResult.data, profile.role) : null;
+  }
+  if (!profile || !org) {
+    const found = await membershipFromBook(supabase, session.user.id);
+    if (found) {
+      profile = profile ?? found.profile;
+      org = org ?? found.org;
+    }
   }
   return {
     user: {
@@ -119,7 +151,7 @@ export function createSupabaseRemote() {
       return account;
     },
     async signOut() {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: "local" });
     },
     session() {
       return loadAccount(supabase);

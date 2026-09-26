@@ -12,7 +12,7 @@
   --overdue: #8e2f28;
   --overdue-soft: #f8e8e6;
   --shadow: 0 24px 80px rgba(40, 32, 20, 0.28);
-  --font: Manrope, "Segoe UI", sans-serif;
+  --font: "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --safe-bottom: env(safe-area-inset-bottom);
 }
 
