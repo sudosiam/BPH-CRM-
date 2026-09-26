@@ -153,7 +153,7 @@ function Shell() {
             <button className="icon-btn header-side" type="button" aria-label="Back" onClick={book.back}>
               <IconBack />
             </button>
-            <p className="header-title">{book.screen === "edit" ? (book.detailId ? "Edit lead" : "New lead") : "Lead"}</p>
+            <p className="header-title">{book.screen === "edit" ? (book.detailId ? "Edit lead" : "New lead") : lead?.name || "Lead"}</p>
             {book.screen === "detail" ? (
               <button className="text-btn header-side" type="button" onClick={book.editCurrent}>
                 Edit

@@ -551,33 +551,92 @@ export function DetailScreen() {
   const due = dueMeta(lead.followUpOn, today);
   const adder = ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me);
   const recent = activity.slice(-8).reverse();
+  const historyLines = (lead.history || "")
+    .split("\n")
+    .filter(Boolean)
+    .slice(-8)
+    .reverse();
+  const localHistory = historyLines.length ? [] : recent.map((item) => `${relativeTime(item.at)} · ${item.text}`);
+  const timeline = historyLines.length ? historyLines : localHistory;
   return (
     <div className="detail">
-      <div className="detail-hero">
-        <span className="avatar" style={{ background: tone(lead.name) }}>
-          {initials(lead.name)}
-        </span>
-        <div>
-          <h1>{lead.name}</h1>
-          <p className="meta">Owner · {adder}</p>
+      <section className="detail-hero">
+        <div className="detail-id">
+          <span className="avatar" style={{ background: tone(lead.name) }}>
+            {initials(lead.name)}
+          </span>
+          <div>
+            <h1>{lead.name}</h1>
+            <p className="meta">
+              Owner · {adder}
+              {lead.source ? ` · ${lead.source}` : ""}
+            </p>
+          </div>
         </div>
-      </div>
-      <div className="status-switch" role="group" aria-label="Status">
-        {(["lead", "sold", "lost"] as const).map((status) => (
-          <button key={status} type="button" className={lead.status === status ? "on" : ""} onClick={() => void book.setStatus(status)}>
-            {labelStatus(status)}
-          </button>
-        ))}
-      </div>
+        {lead.status === "lead" ? (
+          <p className={`due-pill ${due.className}`}>{due.text}</p>
+        ) : (
+          <p className={`due-pill ${lead.status}`}>{labelStatus(lead.status)} · {prettyDate(lead.closedOn || today)}</p>
+        )}
+        {lead.phone ? (
+          <>
+            <p className="detail-phone">{lead.phone}</p>
+            <div className="pair">
+              <a className="ghost wide call-btn" href={telHref(lead.phone)} onClick={() => book.noteActivity(lead.id, "Called")}>
+                Call
+              </a>
+              <a
+                className="ghost wide wa"
+                href={waHref(lead.phone, fillTemplate(book.waTemplate, lead.name))}
+                target="_blank"
+                rel="noopener"
+                onClick={() => book.noteActivity(lead.id, "Opened WhatsApp")}
+              >
+                WhatsApp
+              </a>
+            </div>
+          </>
+        ) : null}
+        <div className="status-switch" role="group" aria-label="Status">
+          {(["lead", "sold", "lost"] as const).map((status) => (
+            <button key={status} type="button" className={lead.status === status ? "on" : ""} onClick={() => void book.setStatus(status)}>
+              {labelStatus(status)}
+            </button>
+          ))}
+        </div>
+      </section>
       {lead.status === "lead" ? (
         <div className="card-block">
           <h2>Follow-up</h2>
-          <p className={`due-line ${due.className}`}>{due.text}</p>
           <FollowChips selected={lead.followUpOn} today={today} onPick={(iso) => void book.setFollowUp(iso)} />
           <label className="field">
-            <span>Date</span>
+            <span>Pick a date</span>
             <input type="date" value={lead.followUpOn || ""} onChange={(event) => void book.setFollowUp(event.target.value || null)} />
           </label>
+          {lead.phone ? (
+            <>
+              <h2 className="subhead">After the call</h2>
+              <div className="chips">
+                <button type="button" className="chip" onClick={() => void book.recordResult("no-answer")}>
+                  No answer
+                </button>
+                <button type="button" className="chip" onClick={() => void book.recordResult("later")}>
+                  Call later
+                </button>
+                <button type="button" className="chip" onClick={() => void book.recordResult("quoted")}>
+                  Quoted
+                </button>
+                <button type="button" className="chip" onClick={() => void book.recordResult("not-interested")}>
+                  Not interested
+                </button>
+              </div>
+            </>
+          ) : null}
+          {lead.lastContactAt ? (
+            <p className="meta">
+              Last call {relativeTime(lead.lastContactAt)} · Called {lead.contactCount || 0}×
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="card-block">
@@ -611,79 +670,25 @@ export function DetailScreen() {
           )}
         </div>
       )}
-      {lead.phone ? (
-        <div className="card-block">
-          <p className="detail-phone">{lead.phone}</p>
-          <div className="pair">
-            <a className="ghost wide call-btn" href={telHref(lead.phone)} onClick={() => book.noteActivity(lead.id, "Called")}>
-              Call
-            </a>
-            <a
-              className="ghost wide wa"
-              href={waHref(lead.phone, fillTemplate(book.waTemplate, lead.name))}
-              target="_blank"
-              rel="noopener"
-              onClick={() => book.noteActivity(lead.id, "Opened WhatsApp")}
-            >
-              WhatsApp
-            </a>
-          </div>
-          {lead.status === "lead" ? (
-            <div className="chips">
-              <button type="button" className="chip" onClick={() => void book.recordResult("no-answer")}>
-                No answer
-              </button>
-              <button type="button" className="chip" onClick={() => void book.recordResult("later")}>
-                Call later
-              </button>
-              <button type="button" className="chip" onClick={() => void book.recordResult("quoted")}>
-                Quoted
-              </button>
-              <button type="button" className="chip" onClick={() => void book.recordResult("not-interested")}>
-                Not interested
-              </button>
-            </div>
-          ) : null}
-          {lead.lastContactAt ? (
-            <p className="meta">
-              Last call {relativeTime(lead.lastContactAt)} · Called {lead.contactCount || 0}×
-            </p>
-          ) : null}
-        </div>
-      ) : null}
       {lead.notes ? (
         <div className="card-block">
           <h2>Notes</h2>
           <p className="notes">{lead.notes}</p>
         </div>
       ) : null}
-      {(lead.history || recent.length) ? (
+      {timeline.length ? (
         <div className="card-block">
           <h2>History</h2>
-          {(lead.history || "")
-            .split("\n")
-            .filter(Boolean)
-            .slice(-8)
-            .reverse()
-            .map((line, index) => (
-              <p className="meta" key={`${index}-${line}`}>
-                {line}
-              </p>
+          <ul className="timeline">
+            {timeline.map((line, index) => (
+              <li key={`${index}-${line}`}>{line}</li>
             ))}
-          {!lead.history
-            ? recent.map((item) => (
-                <p className="meta" key={item.id}>
-                  {relativeTime(item.at)} · {item.text}
-                </p>
-              ))
-            : null}
+          </ul>
         </div>
       ) : null}
-      <div className="detail-lines">
-        <p>
-          Last change · {ownerName(book.profiles, lead.updatedBy, book.me)} · {relativeTime(lead.updatedAt)}
-        </p>
-      </div>
+      <p className="detail-foot">
+        Last change · {ownerName(book.profiles, lead.updatedBy, book.me)} · {relativeTime(lead.updatedAt)}
+      </p>
       <button className="delete-link" type="button" onClick={() => book.setSheet("delete")}>
         Delete lead
       </button>
