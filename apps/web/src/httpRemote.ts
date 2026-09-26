@@ -73,6 +73,14 @@ export function createHttpRemote() {
       if (!response.ok) throw new Error(data.error || "Could not join.");
       return data as { org: Org; profile: Profile };
     },
+    async setWaTemplate(template: string) {
+      const { response, data } = await request("/api/orgs/template", {
+        method: "POST",
+        body: JSON.stringify({ template }),
+      });
+      if (!response.ok) throw new Error(data.error || "Could not save the message.");
+      return String(data.waTemplate ?? "");
+    },
     async regenerateCode() {
       const { response, data } = await request("/api/orgs/invite/regenerate", { method: "POST" });
       if (!response.ok) throw new Error(data.error || "Could not change the code.");

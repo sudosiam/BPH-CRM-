@@ -328,7 +328,61 @@ test("rejoin, idempotent insert, transfer, and a damaged book file", async () =>
   const damaged = path.join(dir, "book.json");
   writeFileSync(damaged, "{");
   assert.throws(() => createBook(damaged), /damaged/);
-  writeFileSync(`${damaged}.tmp`, JSON.stringify({ users: [{ id: "kept" }] }));
-  const recovered = createBook(damaged);
-  assert.equal(recovered.state.users[0].id, "kept");
+  writeFileSync(`${damaged}.bak`, JSON.stringify({ users: [{ id: "bak" }] }));
+  const fromBak = createBook(damaged);
+  assert.equal(fromBak.state.users[0].id, "bak");
+  const tmpOnly = path.join(dir, "tmp-only.json");
+  writeFileSync(tmpOnly, "{");
+  writeFileSync(`${tmpOnly}.tmp`, JSON.stringify({ users: [{ id: "kept" }] }));
+  const fromTmp = createBook(tmpOnly);
+  assert.equal(fromTmp.state.users[0].id, "kept");
+});
+
+test("sold amount, source, and the shared message", async () => {
+  const { server, base } = await boot();
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    const pushed = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: {
+          id: crypto.randomUUID(),
+          name: "Meter",
+          phone: "1",
+          notes: "",
+          status: "sold",
+          followUpOn: null,
+          closedOn: "2026-09-26",
+          soldAmount: 1500,
+          source: "Walk-in",
+          lostReason: null,
+          history: "2026-09-26 · Added",
+          contactCount: 1,
+        },
+      },
+    });
+    assert.equal(pushed.status, 200);
+    assert.equal(pushed.data.lead.soldAmount, 1500);
+    assert.equal(pushed.data.lead.source, "Walk-in");
+    const template = await json(base, "/api/orgs/template", {
+      method: "POST",
+      token: owner.data.token,
+      body: { template: "Hi {name}" },
+    });
+    assert.equal(template.status, 200);
+    const pulled = await json(base, "/api/sync/pull", { token: owner.data.token });
+    assert.equal(pulled.data.org.waTemplate, "Hi {name}");
+  } finally {
+    server.close();
+  }
 });

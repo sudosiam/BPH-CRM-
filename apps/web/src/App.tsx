@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BookProvider, useBook } from "./book";
 import { IconBack, IconLeads, IconPlus, IconSettings, IconToday } from "./icons";
-import { digestCounts, todayISO } from "@shared/book.mjs";
+import { digestCounts, relativeTime, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
   AuthScreen,
@@ -61,7 +61,7 @@ function Shell() {
   const showFab = book.screen === "today" || book.screen === "leads";
   const dueCounts = book.me ? digestCounts(book.leads, todayISO(book.me.timezone)) : { today: 0, overdue: 0 };
   const badge = dueCounts.today + dueCounts.overdue;
-  const syncLabel = book.sync === "syncing" ? "Syncing" : book.sync === "saved" ? "On phone" : "Synced";
+  const syncLabel = book.sync === "syncing" ? "Syncing" : book.sync === "saved" ? "On phone" : book.syncedAt ? `Synced ${relativeTime(book.syncedAt)}` : "Synced";
   const lead = book.leads.find((item) => item.id === book.detailId);
   const [shift, setShift] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -221,7 +221,16 @@ function Shell() {
           <IconPlus />
         </button>
       ) : null}
-      {book.toast ? <div id="toast" className={tabbed ? "" : "low"}>{book.toast}</div> : null}
+      {book.undo ? (
+        <div id="toast" className={tabbed ? "" : "low"}>
+          {book.undo}{" "}
+          <button className="text-btn" type="button" onClick={() => void book.undoLast()}>
+            Undo
+          </button>
+        </div>
+      ) : book.toast ? (
+        <div id="toast" className={tabbed ? "" : "low"}>{book.toast}</div>
+      ) : null}
       {book.sheet === "delete" && lead ? (
         <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
           <div className="sheet" role="dialog" aria-modal="true">
@@ -238,7 +247,7 @@ function Shell() {
       ) : null}
       {book.updateReady ? (
         <button className="update-banner" type="button" onClick={book.applyUpdate}>
-          Update ready
+          Update ready — refresh
         </button>
       ) : null}
       {book.sheet === "signout" ? (
@@ -276,6 +285,34 @@ function Shell() {
             <p>You become a member. They can remove people and change the invite code.</p>
             <button className="primary" type="button" onClick={() => void book.confirmTransfer()}>
               Transfer ownership
+            </button>
+            <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {book.sheet === "discard" ? (
+        <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
+          <div className="sheet" role="dialog" aria-modal="true">
+            <h2>Leave without saving?</h2>
+            <p>The changes on this screen will be dropped.</p>
+            <button className="danger" type="button" onClick={book.confirmDiscard}>
+              Discard
+            </button>
+            <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
+              Keep editing
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {book.sheet === "code" ? (
+        <div id="sheet" onClick={(event) => event.currentTarget === event.target && book.setSheet(null)}>
+          <div className="sheet" role="dialog" aria-modal="true">
+            <h2>New invite code?</h2>
+            <p>The current code stops working for anyone who has not joined yet.</p>
+            <button className="primary" type="button" onClick={() => void book.confirmRegenerate()}>
+              Replace code
             </button>
             <button className="ghost wide" type="button" onClick={() => book.setSheet(null)}>
               Cancel

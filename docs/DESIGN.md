@@ -2,7 +2,7 @@
 
 BPH is a mobile CRM with four jobs: keep a lead, remember the follow-up date, and mark it Sold or Lost. It is shared by a small team. The phone keeps a full copy of the book so the app opens immediately, including offline. Supabase is the shared database.
 
-This document is the product and technical plan. The clickable visual spec is `prototype/index.html`.
+This document is the product and technical plan. The live styles are in `apps/web/src/styles.css`.
 
 ## Decisions
 
@@ -176,7 +176,7 @@ Sign out clears the local book after the outbox is empty, or warns if uploads ar
 
 ## Visual design
 
-The prototype is the source for spacing, type, and color. Tokens:
+Spacing, type, and color live in `apps/web/src/styles.css`. Tokens:
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -336,7 +336,7 @@ Clients never receive the service-role key.
 | Piece | Choice |
 | --- | --- |
 | App | Vite, React, TypeScript |
-| UI | The tokens and layout in the prototype |
+| UI | The tokens and layout in `apps/web/src/styles.css` |
 | Local database | Dexie (IndexedDB) |
 | Server | Supabase Auth, Postgres, Realtime, Edge Functions |
 | Dates | Calendar dates in local civil time, compared as `YYYY-MM-DD` |
@@ -367,7 +367,7 @@ Environment:
 
 ## Build order
 
-1. **Shell.** App frame, tabs, Today, Leads, lead detail, new lead, and the visual tokens. Local sample data. This is what the prototype already tries as a design.
+1. **Shell.** App frame, tabs, Today, Leads, lead detail, new lead, and the visual tokens.
 2. **Accounts.** Supabase Auth, `create_org`, `join_org`, profiles, invite code, row-level security.
 3. **Local copy.** Dexie, the blocking first copy, optimistic writes, outbox, version conflicts, realtime, and the foreground pull.
 4. **Reminders.** Permission, subscription storage, hourly digest, badge count, quiet mornings when nothing is due.

@@ -26,6 +26,12 @@ function mapLead(row: Record<string, unknown>): Lead {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     deletedAt: (row.deleted_at as string | null) ?? null,
+    soldAmount: row.sold_amount == null ? null : Number(row.sold_amount),
+    lostReason: (row.lost_reason as string | null) ?? null,
+    source: (row.source as string | null) ?? null,
+    lastContactAt: (row.last_contact_at as string | null) ?? null,
+    contactCount: Number(row.contact_count ?? 0),
+    history: String(row.history ?? ""),
   };
 }
 
@@ -47,6 +53,7 @@ function mapOrg(row: Record<string, unknown>, role: Profile["role"] | undefined)
     id: String(row.id),
     name: String(row.name),
     inviteCode: role === "owner" ? String(row.invite_code) : null,
+    waTemplate: row.wa_template ? String(row.wa_template) : null,
   };
 }
 
@@ -64,7 +71,25 @@ function toRow(lead: Lead, userId: string) {
     created_by: lead.createdBy || userId,
     updated_by: userId,
     deleted_at: lead.deletedAt,
+    sold_amount: lead.soldAmount,
+    lost_reason: lead.lostReason,
+    source: lead.source,
+    last_contact_at: lead.lastContactAt,
+    contact_count: lead.contactCount || 0,
+    history: lead.history || "",
   };
+}
+
+const LEAD_EXTRAS = ["sold_amount", "lost_reason", "source", "last_contact_at", "contact_count", "history"] as const;
+
+function withoutLeadExtras(row: Record<string, unknown>) {
+  const slim = { ...row };
+  for (const key of LEAD_EXTRAS) delete slim[key];
+  return slim;
+}
+
+function missingColumn(error: { message?: string } | null) {
+  return /column|schema cache/i.test(error?.message || "");
 }
 
 function isNetworkError(error: { message?: string } | null) {
@@ -93,6 +118,7 @@ async function membershipFromBook(supabase: SupabaseClient, userId: string): Pro
       id: String(row.org_id),
       name: String(row.org_name || "Your book"),
       inviteCode: role === "owner" && row.invite_code ? String(row.invite_code) : null,
+      waTemplate: row.wa_template ? String(row.wa_template) : null,
     },
   };
 }
@@ -184,6 +210,11 @@ export function createSupabaseRemote() {
       if (!account?.org || !account.profile) throw new Error("Could not join.");
       return { org: account.org, profile: account.profile };
     },
+    async setWaTemplate(template: string) {
+      const { data, error } = await supabase.rpc("set_wa_template", { template });
+      if (error) throw new Error(error.message);
+      return String(data ?? "");
+    },
     async regenerateCode() {
       const { data, error } = await supabase.rpc("regenerate_invite_code");
       if (error) throw new Error(error.message);
@@ -238,7 +269,12 @@ export function createSupabaseRemote() {
       const userId = (await supabase.auth.getUser()).data.user?.id ?? lead.updatedBy;
       const row = toRow(lead, userId);
       if (baseVersion == null) {
-        const { data, error } = await supabase.from("leads").insert(row).select("*").single();
+        let { data, error } = await supabase.from("leads").insert(row).select("*").single();
+        if (error && missingColumn(error)) {
+          const retry = await supabase.from("leads").insert(withoutLeadExtras(row)).select("*").single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (!error && data) return { ok: true, lead: mapLead(data) };
         const duplicate = error?.code === "23505" || /duplicate key/i.test(error?.message || "");
         if (duplicate) {
@@ -247,7 +283,12 @@ export function createSupabaseRemote() {
         }
         throw new Error(error?.message || "Could not sync.");
       }
-      const { data, error } = await supabase.from("leads").update(row).eq("id", lead.id).eq("version", baseVersion).select("*").maybeSingle();
+      let { data, error } = await supabase.from("leads").update(row).eq("id", lead.id).eq("version", baseVersion).select("*").maybeSingle();
+      if (error && missingColumn(error)) {
+        const retry = await supabase.from("leads").update(withoutLeadExtras(row)).eq("id", lead.id).eq("version", baseVersion).select("*").maybeSingle();
+        data = retry.data;
+        error = retry.error;
+      }
       if (error) throw new Error(error.message);
       if (!data) {
         const current = await supabase.from("leads").select("*").eq("id", lead.id).maybeSingle();

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, assignCustomerName, duplicatePhone, hasLocalBook, leadsCsv, newId, todayISO } from "@shared/book.mjs";
+import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadsCsv, newId, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
@@ -20,6 +20,7 @@ export type Draft = {
   notes: string;
   followUpOn: string | null;
   ownerId: string;
+  source: string | null;
 };
 
 type BookValue = {
@@ -35,7 +36,12 @@ type BookValue = {
   copyLabel: string;
   error: string;
   toast: string;
-  sheet: "delete" | "signout" | "remove" | "transfer" | "duplicate" | null;
+  sheet: "delete" | "signout" | "remove" | "transfer" | "duplicate" | "discard" | "code" | null;
+  undo: string;
+  conflictDraft: Draft | null;
+  editorDirty: boolean;
+  syncedAt: string | null;
+  snoozed: boolean;
   pendingMemberId: string | null;
   duplicateLeadName: string;
   pushReady: boolean;
@@ -66,12 +72,21 @@ type BookValue = {
   saveDraft: (draft: Draft, force?: boolean) => Promise<void>;
   setStatus: (status: Lead["status"]) => Promise<void>;
   setFollowUp: (iso: string | null) => Promise<void>;
+  recordResult: (kind: "no-answer" | "later" | "quoted" | "not-interested") => Promise<void>;
+  setSoldAmount: (amount: number | null) => Promise<void>;
+  setLostReason: (reason: string) => Promise<void>;
+  stampContact: (label: string) => Promise<void>;
   deleteLead: () => Promise<void>;
+  undoLast: () => Promise<void>;
+  setEditorDirty: (dirty: boolean) => void;
+  confirmDiscard: () => void;
+  snoozeReminder: () => void;
   setReminders: (enabled: boolean) => Promise<void>;
   setReminderTime: (minute: number) => Promise<void>;
   waTemplate: string;
   setWaTemplate: (value: string) => void;
-  regenerateCode: () => Promise<void>;
+  regenerateCode: () => void;
+  confirmRegenerate: () => Promise<void>;
   removeMember: (id: string) => void;
   confirmRemove: () => Promise<void>;
   transferOwner: (id: string) => void;
@@ -118,6 +133,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [duplicateLeadName, setDuplicateLeadName] = useState("");
   const [pushReady, setPushReady] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
+  const [undo, setUndo] = useState("");
+  const [undoRun, setUndoRun] = useState<(() => Promise<void>) | null>(null);
+  const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [snoozed, setSnoozed] = useState(false);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -140,6 +161,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
   function showToast(text: string) {
     setToast(text);
     window.setTimeout(() => setToast((current) => (current === text ? "" : current)), 2200);
+  }
+
+  function offerUndo(label: string, run: () => Promise<void>) {
+    setUndo(label);
+    setUndoRun(() => run);
+    window.setTimeout(() => {
+      setUndo((current) => (current === label ? "" : current));
+    }, 5000);
   }
 
   async function tokenFor(accountUserId: string, accountEmail: string, nextOrg: Org | null, flags?: { fullSyncComplete?: boolean; cursor?: string | null }) {
@@ -182,9 +211,26 @@ export function BookProvider({ children }: { children: ReactNode }) {
           setHeld(true);
           return;
         }
-        await flushOutbox(showToast);
+        await flushOutbox(showToast, (local, server) => {
+          setConflictDraft({
+            id: server.id,
+            name: local.name,
+            phone: local.phone,
+            notes: local.notes,
+            followUpOn: local.followUpOn,
+            ownerId: local.ownerId,
+            source: local.source,
+          });
+          setDetailId(server.id);
+          setStack((current) => {
+            const root = current.find((screen) => screen === "today" || screen === "leads") ?? "today";
+            return [root, "edit"];
+          });
+          setEditorDirty(true);
+        });
         await runIncremental();
         setHeld(false);
+        setSyncedAt(new Date().toISOString());
       } catch {
         setHeld(true);
       } finally {
@@ -207,7 +253,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     if ((await db.outbox.count()) > 0) throw new Error("Some changes are still on this phone. Wait until it says Synced, then sign in.");
   }
 
-  async function openAccount(account: Account, forceCopy: boolean) {
+  async function openAccount(account: Account, forceCopy: boolean, signOutRemoved = false) {
     const saved = await db.meta.get("local");
     if (saved && saved.userId && saved.userId !== account.user.id) await clearPhoneCopy();
     const same =
@@ -223,6 +269,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
           /* A removed person can no longer push. */
         }
         await clearPhoneCopy();
+        if (signOutRemoved) {
+          try {
+            await remote.signOut();
+          } catch {
+            /* The phone copy is already cleared. */
+          }
+          setHttpToken("");
+          setUserId("");
+          setEmail("");
+          setStack(["today"]);
+          setPhase("auth");
+          return;
+        }
       }
       await tokenFor(account.user.id, account.user.email, null, { fullSyncComplete: false, cursor: null });
       setUserId(account.user.id);
@@ -317,7 +376,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (account.removed) {
-        await openAccount(account, false);
+        await openAccount(account, false, true);
         return;
       }
       if (opened && saved) {
@@ -363,18 +422,53 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }, [phase]);
 
   useEffect(() => {
+    if (phase !== "app" || !userId) return;
+    const self = profiles.find((profile) => profile.id === userId);
+    if (!self?.removedAt) return;
+    void (async () => {
+      try {
+        await flushOutbox(() => {});
+      } catch {
+        /* Their access is already gone. */
+      }
+      await clearPhoneCopy();
+      try {
+        await remote.signOut();
+      } catch {
+        /* Show sign-in either way. */
+      }
+      setHttpToken("");
+      setUserId("");
+      setEmail("");
+      setStack(["today"]);
+      setPhase("auth");
+    })();
+  }, [profiles, phase, userId]);
+
+  useEffect(() => {
+    if (phase !== "app" || !me || !navigator.onLine) return;
+    const here = zone();
+    if (!here || here === me.timezone) return;
+    void remote.updateProfile({ ...me, timezone: here }).then((profile) => db.profiles.put(profile)).catch(() => {});
+  }, [phase, me?.id, me?.timezone]);
+
+  useEffect(() => {
     syncBadge(leads, me);
     if (phase === "app") void maybeLocalDigest(leads, me, pushActive);
   }, [leads, me, phase, pushActive]);
 
   useEffect(() => {
     if (!org?.id) return;
+    if (org.waTemplate) {
+      setWaTemplateState(org.waTemplate);
+      return;
+    }
     try {
       setWaTemplateState(localStorage.getItem(`${WA_KEY}:${org.id}`) ?? DEFAULT_WA_TEMPLATE);
     } catch {
       setWaTemplateState(DEFAULT_WA_TEMPLATE);
     }
-  }, [org?.id]);
+  }, [org?.id, org?.waTemplate]);
 
   useEffect(() => {
     void remote.vapidPublicKey().then((key) => setPushReady(Boolean(key))).catch(() => setPushReady(false));
@@ -431,6 +525,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setStack((current) => [...current, "detail"]);
     },
     back() {
+      if (screen === "edit" && editorDirty) {
+        setSheet("discard");
+        return;
+      }
+      setEditorDirty(false);
       setStack((current) => (current.length > 1 ? current.slice(0, -1) : current));
       setSheet(null);
     },
@@ -571,11 +670,17 @@ export function BookProvider({ children }: { children: ReactNode }) {
     confirmSignOut: finishSignOut,
     async saveDraft(next, force = false) {
       const typed = next.name.trim();
+      const queued = await db.outbox.toArray();
+      const queuedNames: string[] = [];
+      for (const item of queued) {
+        const row = await db.leads.get(item.id);
+        if (row && row.id !== next.id) queuedNames.push(row.name);
+      }
       const name =
         typed ||
         assignCustomerName(
           "",
-          leads.filter((lead) => lead.id !== next.id).map((lead) => lead.name),
+          [...leads.filter((lead) => lead.id !== next.id).map((lead) => lead.name), ...queuedNames],
         );
       if (!org || !me) return;
       if (!force) {
@@ -596,6 +701,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
             name,
             phone: next.phone.trim(),
             notes: next.notes.trim(),
+            source: next.source,
             ownerId: current.ownerId,
             updatedBy: me.id,
             updatedAt: new Date().toISOString(),
@@ -603,6 +709,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           current.version,
         );
         showToast("Saved");
+        setEditorDirty(false);
         void logActivity(current.id, "Edited");
         setStack((current) => current.slice(0, -1));
       } else {
@@ -618,6 +725,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
           ownerId: me.id,
           createdBy: me.id,
           updatedBy: me.id,
+          soldAmount: null,
+          lostReason: null,
+          source: next.source,
+          lastContactAt: null,
+          contactCount: 0,
+          history: appendHistory("", todayISO(me.timezone || zone()), "Added"),
           version: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -626,6 +739,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         await queueLead(lead, null);
         void logActivity(lead.id, "Added");
         setDetailId(lead.id);
+        setEditorDirty(false);
         setStack((current) => [current[0] ?? "today", "detail"]);
         showToast("Lead saved");
       }
@@ -635,14 +749,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
       const current = detailId ? await db.leads.get(detailId) : null;
       if (!current || current.status === status) return;
       const today = todayISO(me?.timezone || zone());
+      const previous = { ...current };
       await changeLead(
         status === "lead"
           ? { status, closedOn: null, followUpOn: current.followUpOn || addDays(today, 1) }
-          : { status, followUpOn: null, closedOn: today },
+          : { status, followUpOn: null, closedOn: today, lostReason: status === "lost" ? current.lostReason : null },
       );
       const label = status === "sold" ? "Marked sold" : status === "lost" ? "Marked lost" : "Back to Lead";
       if (detailId) void logActivity(detailId, label);
-      showToast(label);
+      offerUndo(label, async () => {
+        await queueLead({ ...previous, updatedAt: new Date().toISOString() }, previous.version);
+        void syncNow();
+      });
     },
     async setFollowUp(iso) {
       await changeLead({ followUpOn: iso });
@@ -650,10 +768,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
       showToast(iso ? "Follow-up saved" : "Follow-up cleared");
     },
     async deleteLead() {
+      const current = detailId ? await db.leads.get(detailId) : null;
       await changeLead({ deletedAt: new Date().toISOString() });
       setSheet(null);
       setStack((current) => current.slice(0, -1));
-      showToast("Lead deleted");
+      if (current) {
+        offerUndo("Lead deleted", async () => {
+          await queueLead({ ...current, deletedAt: null, updatedAt: new Date().toISOString() }, current.version);
+          void syncNow();
+        });
+      }
     },
     async setReminders(enabled) {
       if (!me) return;
@@ -663,6 +787,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           showToast("Reminders stay off until you allow alerts.");
           return;
         }
+        if (result !== "push") showToast("Closed-app alerts are not set up. Alerts still show while the app is open.");
         setPushActive(result === "push");
       }
       const profile = await remote.updateProfile({ ...me, notifyEnabled: enabled });
@@ -684,11 +809,21 @@ export function BookProvider({ children }: { children: ReactNode }) {
       } catch {
         /* Private browsing can block storage. The template still applies until refresh. */
       }
+      if (me?.role === "owner") {
+        void remote.setWaTemplate(next).then(async (saved) => {
+          const current = await db.meta.get("local");
+          if (current?.org) await db.meta.put({ ...current, org: { ...current.org, waTemplate: saved } });
+        }).catch(() => {});
+      }
     },
-    async regenerateCode() {
+    regenerateCode() {
+      setSheet("code");
+    },
+    async confirmRegenerate() {
       const inviteCode = await remote.regenerateCode();
       const current = await db.meta.get("local");
       if (current?.org) await db.meta.put({ ...current, org: { ...current.org, inviteCode } });
+      setSheet(null);
       showToast("New code ready");
     },
     removeMember(id) {
@@ -765,8 +900,103 @@ export function BookProvider({ children }: { children: ReactNode }) {
         setError(reason instanceof Error ? reason.message : "Could not send the reset email.");
       }
     },
+    async recordResult(kind) {
+      const current = detailId ? await db.leads.get(detailId) : null;
+      if (!current || !me) return;
+      const today = todayISO(me.timezone || zone());
+      const result = followUpResult(kind, today, current.followUpOn);
+      if (!result) return;
+      await queueLead(
+        {
+          ...current,
+          status: result.status,
+          followUpOn: result.followUpOn,
+          closedOn: result.closedOn,
+          lastContactAt: new Date().toISOString(),
+          contactCount: (current.contactCount || 0) + 1,
+          history: appendHistory(current.history, today, result.label),
+          updatedBy: me.id,
+          updatedAt: new Date().toISOString(),
+        },
+        current.version,
+      );
+      void logActivity(current.id, result.label);
+      showToast(result.label);
+      void syncNow();
+    },
+    async setSoldAmount(amount) {
+      await changeLead({ soldAmount: amount });
+    },
+    async setLostReason(reason) {
+      const today = todayISO(me?.timezone || zone());
+      const current = detailId ? await db.leads.get(detailId) : null;
+      await changeLead({
+        lostReason: reason,
+        history: current ? appendHistory(current.history, today, reason) : undefined,
+      });
+    },
+    async stampContact(label) {
+      const current = detailId ? await db.leads.get(detailId) : null;
+      if (!current || !me) return;
+      const today = todayISO(me.timezone || zone());
+      await queueLead(
+        {
+          ...current,
+          lastContactAt: new Date().toISOString(),
+          contactCount: (current.contactCount || 0) + 1,
+          history: appendHistory(current.history, today, label),
+          updatedBy: me.id,
+          updatedAt: new Date().toISOString(),
+        },
+        current.version,
+      );
+      void logActivity(current.id, label);
+      void syncNow();
+    },
+    async undoLast() {
+      const run = undoRun;
+      setUndo("");
+      setUndoRun(null);
+      if (run) await run();
+    },
+    setEditorDirty(dirty) {
+      setEditorDirty(dirty);
+    },
+    confirmDiscard() {
+      setEditorDirty(false);
+      setConflictDraft(null);
+      setSheet(null);
+      setStack((current) => (current.length > 1 ? current.slice(0, -1) : current));
+    },
+    snoozeReminder() {
+      if (!me) return;
+      try {
+        localStorage.setItem(`bph-snooze:${me.id}:${todayISO(me.timezone)}`, "1");
+      } catch {
+        /* The card hides until the next open either way. */
+      }
+      setSnoozed(true);
+    },
     noteActivity(leadId, text) {
       void logActivity(leadId, text);
+      const currentId = leadId;
+      void (async () => {
+        const current = await db.leads.get(currentId);
+        if (!current || !me) return;
+        const today = todayISO(me.timezone || zone());
+        await queueLead(
+          {
+            ...current,
+            lastContactAt: new Date().toISOString(),
+            contactCount: (current.contactCount || 0) + 1,
+            history: appendHistory(current.history, today, text),
+            updatedBy: me.id,
+            updatedAt: new Date().toISOString(),
+          },
+          current.version,
+        );
+        void syncNow();
+      })();
     },
     applyUpdate() {
       window.dispatchEvent(new Event("bph-apply-update"));
@@ -775,6 +1005,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
     duplicateLeadName,
     pushReady,
     updateReady,
+    undo,
+    conflictDraft,
+    editorDirty,
+    syncedAt,
+    snoozed,
     showToast,
   };
 

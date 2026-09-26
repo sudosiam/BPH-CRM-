@@ -59,4 +59,17 @@ declare module "@shared/book.mjs" {
     email: string,
   ): boolean;
   export function relativeTime(iso: string, now?: number): string;
+  export const LOST_REASONS: string[];
+  export const LEAD_SOURCES: string[];
+  export function followUpResult(
+    kind: string,
+    today: string,
+    currentFollowUp: string | null,
+  ): { status: "lead" | "lost"; followUpOn: string | null; closedOn: string | null; label: string } | null;
+  export function appendHistory(history: string, today: string, line: string): string;
+  export function quietDays(lastContactAt: string | null, today: string): number | null;
+  export function soldThisMonth(
+    leads: Array<{ status: string; deletedAt?: string | null; closedOn?: string | null; soldAmount?: number | null }>,
+    today: string,
+  ): { count: number; amount: number };
 }

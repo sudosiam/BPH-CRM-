@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync, copyFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import webpush from "web-push";
@@ -15,6 +15,8 @@ import {
   pullSince,
   assignCustomerName,
   safeTimeZone,
+  LOST_REASONS,
+  LEAD_SOURCES,
 } from "../shared/book.mjs";
 
 const scryptAsync = promisify(scrypt);
@@ -47,7 +49,7 @@ export function createBook(dataFile) {
     try {
       state = readBookFile(dataFile);
     } catch {
-      const recovered = readBookFile(`${dataFile}.tmp`);
+      const recovered = readBookFile(`${dataFile}.bak`) || readBookFile(`${dataFile}.tmp`);
       if (!recovered) throw new Error(`Could not read ${dataFile}. The book file is damaged.`);
       state = recovered;
     }
@@ -72,12 +74,20 @@ export function createBook(dataFile) {
   }
   function persist() {
     const tmp = `${dataFile}.tmp`;
+    const bak = `${dataFile}.bak`;
     const fd = openSync(tmp, "w");
     try {
       writeSync(fd, JSON.stringify(state));
       fsyncSync(fd);
     } finally {
       closeSync(fd);
+    }
+    if (existsSync(dataFile)) {
+      try {
+        copyFileSync(dataFile, bak);
+      } catch {
+        /* The next good write replaces the backup. */
+      }
     }
     renameSync(tmp, dataFile);
   }
@@ -108,6 +118,23 @@ export function createBook(dataFile) {
       id: org.id,
       name: org.name,
       inviteCode: role === "owner" ? org.inviteCode : null,
+      waTemplate: org.waTemplate || null,
+    };
+  }
+
+  function leadExtras(input, current) {
+    const rawAmount = input.soldAmount == null || input.soldAmount === "" ? null : Number(input.soldAmount);
+    const soldAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : current?.soldAmount ?? null;
+    const lostReason = LOST_REASONS.includes(input.lostReason) ? input.lostReason : input.lostReason == null ? current?.lostReason ?? null : null;
+    const source = LEAD_SOURCES.includes(input.source) ? input.source : input.source == null ? current?.source ?? null : null;
+    const contactCount = Number.isInteger(Number(input.contactCount)) ? Number(input.contactCount) : current?.contactCount || 0;
+    return {
+      soldAmount,
+      lostReason,
+      source,
+      lastContactAt: input.lastContactAt || current?.lastContactAt || null,
+      contactCount,
+      history: String(input.history ?? current?.history ?? "").slice(0, 4000),
     };
   }
 
@@ -394,6 +421,7 @@ export function createBook(dataFile) {
         id: crypto.randomUUID(),
         name,
         inviteCode: "",
+        waTemplate: null,
         createdBy: auth.user.id,
         createdAt: new Date().toISOString(),
       };
@@ -471,6 +499,18 @@ export function createBook(dataFile) {
         persist();
       });
       send(res, 200, { inviteCode: code });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/orgs/template") {
+      if (auth.profile.role !== "owner") return send(res, 403, { error: "Only the owner can change the message." });
+      const body = await readJson(req);
+      const template = String(body.template ?? "").slice(0, 500);
+      await mutate(async () => {
+        auth.org.waTemplate = template;
+        persist();
+      });
+      send(res, 200, { waTemplate: template });
       return;
     }
 
@@ -578,6 +618,7 @@ export function createBook(dataFile) {
             ownerId: auth.user.id,
             createdBy: auth.user.id,
             updatedBy: auth.user.id,
+            ...leadExtras(input, null),
             version: 1,
             createdAt: now,
             updatedAt: now,
@@ -601,6 +642,7 @@ export function createBook(dataFile) {
         existing.status = input.status;
         existing.followUpOn = input.followUpOn || null;
         existing.closedOn = input.closedOn || null;
+        Object.assign(existing, leadExtras(input, existing));
         existing.updatedBy = auth.user.id;
         existing.version += 1;
         existing.updatedAt = now;
@@ -667,6 +709,13 @@ export function createBook(dataFile) {
     sendDueDigests().catch((error) => console.error(error));
   }, 30_000);
   timer.unref?.();
+  const pruneTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, row] of attempts) {
+      if (row.reset < now) attempts.delete(key);
+    }
+  }, 60 * 60 * 1000);
+  pruneTimer.unref?.();
 
   return { handler, sendDueDigests, state };
 }

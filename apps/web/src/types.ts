@@ -16,6 +16,12 @@ export type Lead = {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  soldAmount: number | null;
+  lostReason: string | null;
+  source: string | null;
+  lastContactAt: string | null;
+  contactCount: number;
+  history: string;
 };
 
 export type Profile = {
@@ -33,6 +39,7 @@ export type Org = {
   id: string;
   name: string;
   inviteCode: string | null;
+  waTemplate?: string | null;
 };
 
 export type Account = {

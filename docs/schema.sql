@@ -10,6 +10,7 @@ create table public.orgs (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(btrim(name)) between 1 and 80),
   invite_code text not null unique check (invite_code ~ '^[A-HJ-NP-Z2-9]{8}$'),
+  wa_template text not null default '',
   created_by uuid not null,
   created_at timestamptz not null default now()
 );
@@ -46,6 +47,12 @@ create table public.leads (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
+  sold_amount numeric check (sold_amount is null or sold_amount >= 0),
+  lost_reason text,
+  source text,
+  last_contact_at timestamptz,
+  contact_count integer not null default 0,
+  history text not null default '',
   constraint follow_up_only_for_leads check (status = 'lead' or follow_up_on is null),
   constraint open_leads_are_not_closed check (status <> 'lead' or closed_on is null),
   constraint leads_owner_fk foreign key (org_id, owner_id) references public.profiles (org_id, id),
@@ -114,7 +121,8 @@ as $$
     'display_name', p.display_name,
     'timezone', p.timezone,
     'notify_enabled', p.notify_enabled,
-    'notify_minute', p.notify_minute
+    'notify_minute', p.notify_minute,
+    'wa_template', o.wa_template
   )
   from public.profiles p
   join public.orgs o on o.id = p.org_id
@@ -394,7 +402,8 @@ create or replace view public.orgs_visible
 with (security_barrier = true, security_invoker = false) as
 select o.id,
        o.name,
-       case when p.role = 'owner' then o.invite_code else null end as invite_code
+       case when p.role = 'owner' then o.invite_code else null end as invite_code,
+       o.wa_template
 from public.orgs o
 join public.profiles p on p.org_id = o.id and p.id = auth.uid() and p.removed_at is null;
 
@@ -472,6 +481,30 @@ $$;
 
 revoke all on function public.purge_tombstones() from public;
 grant execute on function public.purge_tombstones() to service_role;
+
+create or replace function public.set_wa_template(template text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  org uuid;
+  next_template text := left(coalesce(template, ''), 500);
+begin
+  select org_id into org
+  from public.profiles
+  where id = auth.uid() and role = 'owner' and removed_at is null;
+  if org is null then
+    raise exception 'not owner';
+  end if;
+  update public.orgs set wa_template = next_template where id = org;
+  return next_template;
+end;
+$$;
+
+revoke all on function public.set_wa_template(text) from public;
+grant execute on function public.set_wa_template(text) to authenticated;
 
 alter publication supabase_realtime add table public.leads;
 alter publication supabase_realtime add table public.profiles;

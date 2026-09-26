@@ -7,5 +7,6 @@ server/data/
 .env
 .env.*
 !.env.example
+!apps/web/.env.example
 !.env.production
 .vercel

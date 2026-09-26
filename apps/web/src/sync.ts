@@ -82,7 +82,10 @@ async function settlePush(
   return true;
 }
 
-export async function flushOutbox(onNotice: (message: string) => void) {
+export async function flushOutbox(
+  onNotice: (message: string) => void,
+  onConflict?: (local: Lead, server: Lead) => void,
+) {
   const meta = await db.meta.get("local");
   if (!meta?.fullSyncComplete) return;
   for (let pass = 0; pass < 3; pass += 1) {
@@ -127,8 +130,9 @@ export async function flushOutbox(onNotice: (message: string) => void) {
           onNotice("This lead was deleted.");
         } else {
           await db.leads.put(kept);
+          onConflict?.(lead, kept);
           const actor = (await db.profiles.get(kept.updatedBy))?.displayName ?? "someone";
-          onNotice(`This lead was updated by ${actor}. Your change was not saved.`);
+          onNotice(`This lead was updated by ${actor}. Your change was kept in the editor.`);
         }
         await db.outbox.delete(item.id);
         progressed = true;

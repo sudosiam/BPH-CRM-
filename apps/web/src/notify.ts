@@ -3,7 +3,7 @@ import type { Lead, Profile } from "./types";
 import { remote } from "./remote";
 
 function digestKey(me: Profile) {
-  return `bph-local-digest:${me.orgId}:${me.id}`;
+  return `bph-local-digest:${me.id}`;
 }
 
 function urlBase64ToUint8Array(value: string) {

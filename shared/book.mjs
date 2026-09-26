@@ -192,6 +192,38 @@ export function membershipMatches(record, userId, email) {
   return Boolean(savedEmail && savedEmail === nextEmail);
 }
 
+export const LOST_REASONS = ["Price", "No response", "Bought elsewhere", "Not needed"];
+export const LEAD_SOURCES = ["Walk-in", "Phone", "WhatsApp", "Referral"];
+
+export function followUpResult(kind, today, currentFollowUp) {
+  if (kind === "no-answer") return { status: "lead", followUpOn: addDays(today, 1), closedOn: null, label: "No answer" };
+  if (kind === "later") return { status: "lead", followUpOn: addDays(today, 3), closedOn: null, label: "Call later" };
+  if (kind === "quoted") return { status: "lead", followUpOn: currentFollowUp || null, closedOn: null, label: "Quoted" };
+  if (kind === "not-interested") return { status: "lost", followUpOn: null, closedOn: today, label: "Not interested" };
+  return null;
+}
+
+export function appendHistory(history, today, line) {
+  const next = `${today} · ${line}`;
+  const prev = String(history || "").trim();
+  const combined = prev ? `${prev}\n${next}` : next;
+  return combined.slice(-4000);
+}
+
+export function quietDays(lastContactAt, today) {
+  if (!lastContactAt) return null;
+  const iso = String(lastContactAt).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  return -dayDiff(iso, today);
+}
+
+export function soldThisMonth(leads, today) {
+  const month = String(today).slice(0, 7);
+  const rows = leads.filter((lead) => lead.status === "sold" && !lead.deletedAt && String(lead.closedOn || "").startsWith(month));
+  const amount = rows.reduce((sum, lead) => sum + (Number(lead.soldAmount) || 0), 0);
+  return { count: rows.length, amount };
+}
+
 export function relativeTime(iso, now = Date.now()) {
   const minutes = Math.round((now - new Date(iso).getTime()) / 60000);
   if (minutes < 1) return "Just now";

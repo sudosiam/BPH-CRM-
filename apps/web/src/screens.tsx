@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, dayDiff, digestCounts, digestLine, dueMeta, initials, longDate, prettyDate, relativeTime, todayISO } from "@shared/book.mjs";
+import { addDays, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
@@ -265,18 +265,29 @@ export function CopyScreen() {
 
 export function TodayScreen() {
   const book = useBook();
+  const [everyone, setEveryone] = useState(true);
   const today = todayISO(book.me?.timezone);
-  const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn));
+  const mine = (lead: Lead) => (lead.createdBy || lead.ownerId) === book.me?.id;
+  const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn) && (everyone || mine(lead)));
+  const undated = book.leads.filter((lead) => lead.status === "lead" && !lead.followUpOn && (everyone || mine(lead)));
   const overdue = open.filter((lead) => dayDiff(lead.followUpOn, today) < 0).sort(compareFollow);
   const due = open.filter((lead) => dayDiff(lead.followUpOn, today) === 0).sort(compareFollow);
   const later = open
     .filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 0 && dayDiff(lead.followUpOn, today) <= 7)
     .sort(compareFollow);
   const beyond = open.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 7).length;
-  const showReminder = book.me && !book.me.notifyEnabled && overdue.length + due.length + later.length > 0;
+  const showReminder = book.me && !book.me.notifyEnabled && !book.snoozed && overdue.length + due.length + later.length > 0;
   return (
     <>
       <p className="date-line">{longDate(today)}</p>
+      <div className="segments">
+        <button type="button" className={everyone ? "on" : ""} onClick={() => setEveryone(true)}>
+          Everyone
+        </button>
+        <button type="button" className={everyone ? "" : "on"} onClick={() => setEveryone(false)}>
+          My leads
+        </button>
+      </div>
       {due.length || overdue.length ? (
         <p className="summary">
           {due.length ? <span className="today-due">{due.length} due today</span> : null}
@@ -293,11 +304,15 @@ export function TodayScreen() {
           <button type="button" onClick={() => void book.setReminders(true)}>
             Turn on
           </button>
+          <button className="linkish" type="button" onClick={book.snoozeReminder}>
+            Not now
+          </button>
         </div>
       ) : null}
       <LeadSection title="Overdue" className="overdue" rows={overdue} today={today} />
       <LeadSection title="Due today" className="today-due" rows={due} today={today} />
       <LeadSection title="Later" className="" rows={later} today={today} />
+      <LeadSection title="Needs a date" className="" rows={undated} today={today} />
       {!overdue.length && !due.length ? (
         <div className="empty">
           <h2>Nothing overdue or due today</h2>
@@ -427,6 +442,9 @@ export function LeadsScreen() {
                   <span className="row-copy">
                     <span className="row-name">{lead.name}</span>
                     <span className={`row-sub ${sub.className}`}>{sub.text}</span>
+                    {(quietDays(lead.lastContactAt || lead.createdAt, today) ?? 0) >= 14 ? (
+                      <span className="meta">Quiet {quietDays(lead.lastContactAt || lead.createdAt, today)}d</span>
+                    ) : null}
                     {(lead.createdBy || lead.ownerId) !== book.me?.id ? (
                       <span className="row-owner">{ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me)}</span>
                     ) : null}
@@ -486,6 +504,28 @@ export function DetailScreen() {
         <div className="card-block">
           <h2>{labelStatus(lead.status)}</h2>
           <p className="meta">Closed {prettyDate(lead.closedOn || today)}. Reminders are off.</p>
+          {lead.status === "sold" ? (
+            <label className="field">
+              <span>Amount</span>
+              <input
+                inputMode="decimal"
+                placeholder="Optional"
+                value={lead.soldAmount ?? ""}
+                onChange={(event) => {
+                  const raw = event.target.value.trim();
+                  void book.setSoldAmount(raw ? Number(raw) : null);
+                }}
+              />
+            </label>
+          ) : (
+            <div className="chips">
+              {LOST_REASONS.map((reason) => (
+                <button key={reason} type="button" className={`chip ${lead.lostReason === reason ? "on" : ""}`} onClick={() => void book.setLostReason(reason)}>
+                  {reason}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {lead.phone ? (
@@ -505,6 +545,27 @@ export function DetailScreen() {
               WhatsApp
             </a>
           </div>
+          {lead.status === "lead" ? (
+            <div className="chips">
+              <button type="button" className="chip" onClick={() => void book.recordResult("no-answer")}>
+                No answer
+              </button>
+              <button type="button" className="chip" onClick={() => void book.recordResult("later")}>
+                Call later
+              </button>
+              <button type="button" className="chip" onClick={() => void book.recordResult("quoted")}>
+                Quoted
+              </button>
+              <button type="button" className="chip" onClick={() => void book.recordResult("not-interested")}>
+                Not interested
+              </button>
+            </div>
+          ) : null}
+          {lead.lastContactAt ? (
+            <p className="meta">
+              Last call {relativeTime(lead.lastContactAt)} · Called {lead.contactCount || 0}×
+            </p>
+          ) : null}
         </div>
       ) : null}
       {lead.notes ? (
@@ -513,14 +574,26 @@ export function DetailScreen() {
           <p className="notes">{lead.notes}</p>
         </div>
       ) : null}
-      {recent.length ? (
+      {(lead.history || recent.length) ? (
         <div className="card-block">
-          <h2>On this phone</h2>
-          {recent.map((item) => (
-            <p className="meta" key={item.id}>
-              {relativeTime(item.at)} · {item.text}
-            </p>
-          ))}
+          <h2>History</h2>
+          {(lead.history || "")
+            .split("\n")
+            .filter(Boolean)
+            .slice(-8)
+            .reverse()
+            .map((line, index) => (
+              <p className="meta" key={`${index}-${line}`}>
+                {line}
+              </p>
+            ))}
+          {!lead.history
+            ? recent.map((item) => (
+                <p className="meta" key={item.id}>
+                  {relativeTime(item.at)} · {item.text}
+                </p>
+              ))
+            : null}
         </div>
       ) : null}
       <div className="detail-lines">
@@ -559,15 +632,18 @@ export function EditScreen() {
   const book = useBook();
   const existing = book.detailId ? book.leads.find((lead) => lead.id === book.detailId) : null;
   const today = todayISO(book.me?.timezone);
-  const [draft, setDraft] = useState<Draft>(() =>
-    existing
+  const preset = book.conflictDraft && book.conflictDraft.id === (existing?.id ?? null) ? book.conflictDraft : null;
+  const [draft, setDraft] = useState<Draft>(() => {
+    const base = preset || existing;
+    return base
       ? {
-          id: existing.id,
-          name: existing.name,
-          phone: existing.phone,
-          notes: existing.notes,
-          followUpOn: existing.followUpOn,
-          ownerId: existing.ownerId,
+          id: base.id,
+          name: base.name,
+          phone: base.phone,
+          notes: base.notes,
+          followUpOn: base.followUpOn,
+          ownerId: "ownerId" in base ? base.ownerId : existing?.ownerId || "",
+          source: base.source ?? null,
         }
       : {
           id: null,
@@ -576,36 +652,52 @@ export function EditScreen() {
           notes: "",
           followUpOn: addDays(today, 1),
           ownerId: book.me?.id || "",
-        },
-  );
+          source: null,
+        };
+  });
   const [formError, setFormError] = useState("");
+  function update(next: Draft) {
+    setDraft(next);
+    book.setEditorDirty(true);
+  }
   return (
     <>
       <label className="field">
         <span>Name</span>
-        <input maxLength={120} value={draft.name} placeholder="Optional" onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+        <input maxLength={120} value={draft.name} placeholder="Optional" onChange={(event) => update({ ...draft, name: event.target.value })} />
       </label>
       <p className="hint">Leave the name blank and BPH saves them as Customer 1, Customer 2, and so on.</p>
       <label className="field">
         <span>Phone</span>
-        <input maxLength={40} inputMode="tel" value={draft.phone} placeholder="+880…" onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />
+        <input maxLength={40} inputMode="tel" value={draft.phone} placeholder="+880…" onChange={(event) => update({ ...draft, phone: event.target.value })} />
       </label>
-      {draft.id ? null : (
+      <span className="field">
+        <span>Source</span>
+      </span>
+      <div className="chips">
+        {LEAD_SOURCES.map((source) => (
+          <button key={source} type="button" className={`chip ${draft.source === source ? "on" : ""}`} onClick={() => update({ ...draft, source })}>
+            {source}
+          </button>
+        ))}
+      </div>
+      {(existing?.status ?? "lead") === "lead" ? (
         <>
           <span className="field">
             <span>Follow-up</span>
           </span>
-          <FollowChips selected={draft.followUpOn} today={today} onPick={(iso) => setDraft({ ...draft, followUpOn: iso })} />
+          <FollowChips selected={draft.followUpOn} today={today} onPick={(iso) => update({ ...draft, followUpOn: iso })} />
           <label className="field">
             <span>Date</span>
-            <input type="date" value={draft.followUpOn || ""} onChange={(event) => setDraft({ ...draft, followUpOn: event.target.value || null })} />
+            <input type="date" value={draft.followUpOn || ""} onChange={(event) => update({ ...draft, followUpOn: event.target.value || null })} />
           </label>
           <p className="hint">Without a date, BPH will not remind anyone.</p>
         </>
-      )}
+      ) : null}
+      {book.conflictDraft ? <p className="meta">Someone else saved this lead. Your typing is still here.</p> : null}
       <label className="field">
         <span>Notes</span>
-        <textarea maxLength={2000} placeholder="Optional" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
+        <textarea maxLength={2000} placeholder="Optional" value={draft.notes} onChange={(event) => update({ ...draft, notes: event.target.value })} />
       </label>
       {formError ? <p className="form-error">{formError}</p> : null}
       <div className="form-actions">
@@ -653,6 +745,9 @@ export function AccountScreen() {
               {book.me.role === "owner" ? "Owner" : "Member"} · {book.org.name}
             </p>
             {book.email ? <p className="meta">{book.email}</p> : null}
+            <p className="meta">
+              This month: {soldThisMonth(book.leads, today).count} sold · ৳{soldThisMonth(book.leads, today).amount}
+            </p>
           </div>
         </div>
       </section>
