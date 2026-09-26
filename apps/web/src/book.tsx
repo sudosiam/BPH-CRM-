@@ -10,7 +10,7 @@ import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveM
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
-type Screen = "today" | "leads" | "account" | "detail" | "edit";
+type Screen = "today" | "leads" | "account" | "member" | "detail" | "edit";
 type SyncWord = "synced" | "syncing" | "saved";
 
 export type Draft = {
@@ -47,6 +47,7 @@ type BookValue = {
   pushReady: boolean;
   updateReady: boolean;
   detailId: string | null;
+  memberId: string | null;
   segment: Lead["status"];
   query: string;
   setPhase: (phase: Phase) => void;
@@ -56,6 +57,7 @@ type BookValue = {
   goTab: (screen: "today" | "leads") => void;
   openSettings: () => void;
   openLead: (id: string) => void;
+  openMember: (id: string) => void;
   back: () => void;
   startDraft: () => void;
   editCurrent: () => void;
@@ -126,6 +128,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [stack, setStack] = useState<Screen[]>(["today"]);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [memberId, setMemberId] = useState<string | null>(null);
   const [segment, setSegment] = useState<Lead["status"]>("lead");
   const [query, setQuery] = useState("");
   const [sheet, setSheet] = useState<BookValue["sheet"]>(null);
@@ -508,6 +511,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     toast,
     sheet,
     detailId,
+    memberId,
     segment,
     query,
     navDepth: Math.max(0, stack.length - 1) + (sheet ? 1 : 0),
@@ -532,6 +536,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
     openLead(id) {
       setDetailId(id);
       setStack((current) => [...current, "detail"]);
+    },
+    openMember(id) {
+      setMemberId(id);
+      setStack((current) => [...current, "member"]);
+      setSheet(null);
     },
     back() {
       if (screen === "edit" && editorDirty) {

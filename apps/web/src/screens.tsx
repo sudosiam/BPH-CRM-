@@ -769,62 +769,60 @@ function clock(minute: number) {
   return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
 }
 
+function teamMembers(profiles: Profile[], meId: string) {
+  return profiles
+    .filter((profile) => !profile.removedAt)
+    .sort((a, b) => {
+      if (a.id === meId) return -1;
+      if (b.id === meId) return 1;
+      if (a.role !== b.role) return a.role === "owner" ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
+}
+
 export function AccountScreen() {
   const book = useBook();
   if (!book.me || !book.org) return null;
-  const today = todayISO(book.me.timezone);
-  const counts = digestCounts(book.leads, today);
-  const line = digestLine(counts.today, counts.overdue);
-  const time = clock(book.me.notifyMinute);
-  const code = book.org.inviteCode;
+  const me = book.me;
+  const org = book.org;
+  const today = todayISO(me.timezone);
+  const code = org.inviteCode;
   const preview = fillTemplate(book.waTemplate, "Customer");
   return (
     <div className="settings">
       <section className="part">
         <p className="part-label">You</p>
-        <div className="card-block settings-hero">
-          <span className="avatar settings-avatar" style={{ background: tone(book.me.displayName) }}>
-            {initials(book.me.displayName)}
+        <button className="card-block settings-hero member-open" type="button" onClick={() => book.openMember(me.id)}>
+          <span className="avatar settings-avatar round" style={{ background: tone(me.displayName) }}>
+            {initials(me.displayName)}
           </span>
           <div>
-            <h2>{book.me.displayName}</h2>
+            <h2>{me.displayName}</h2>
             <p className="meta">
-              {book.me.role === "owner" ? "Owner" : "Member"} · {book.org.name}
+              {me.role === "owner" ? "Owner" : "Member"} · {org.name}
             </p>
             {book.email ? <p className="meta">{book.email}</p> : null}
             <p className="meta">
               This month: {soldThisMonth(book.leads, today).count} sold · ৳{soldThisMonth(book.leads, today).amount}
             </p>
           </div>
-        </div>
+        </button>
       </section>
       <section className="part">
         <p className="part-label">Team</p>
         <div className="card-block">
-          {book.profiles
-            .filter((profile) => !profile.removedAt)
-            .map((profile) => (
-              <div className="team-row" key={profile.id}>
-                <strong>{profile.displayName}</strong>
-                <span>
-                  {profile.id === book.me?.id ? "You · " : ""}
-                  {profile.role === "owner" ? "Owner" : "Member"}
-                  {book.me?.role === "owner" && profile.id !== book.me.id ? (
-                    <>
-                      {" "}
-                      <button className="text-btn" type="button" onClick={() => book.transferOwner(profile.id)}>
-                        Make owner
-                      </button>
-                      {" "}
-                      <button className="text-btn" type="button" onClick={() => book.removeMember(profile.id)}>
-                        Remove
-                      </button>
-                    </>
-                  ) : null}
+          <div className="team-scroll">
+            {teamMembers(book.profiles, me.id).map((profile) => (
+              <button className="team-person" key={profile.id} type="button" onClick={() => book.openMember(profile.id)}>
+                <span className="avatar round" style={{ background: tone(profile.displayName) }}>
+                  {initials(profile.displayName)}
                 </span>
-              </div>
+                <strong>{profile.id === me.id ? "You" : profile.displayName}</strong>
+                <em>{profile.role === "owner" ? "Owner" : "Member"}</em>
+              </button>
             ))}
-          {book.me.role === "owner" && code ? (
+          </div>
+          {me.role === "owner" && code ? (
             <div className="code">
               <span>
                 {code.slice(0, 4)} {code.slice(4)}
@@ -848,67 +846,13 @@ export function AccountScreen() {
               </button>
             </div>
           ) : null}
-          {book.me.role === "owner" ? (
+          {me.role === "owner" ? (
             <button className="linkish" type="button" onClick={() => void book.regenerateCode()}>
               New invite code
             </button>
           ) : (
             <p className="meta">You are already in this book. A new code is only for someone new.</p>
           )}
-        </div>
-      </section>
-      <section className="part">
-        <p className="part-label">Reminders</p>
-        <div className="card-block">
-          <h2>Daily alert</h2>
-          <p className="meta">One alert for the team's overdue follow-ups and anything due that day.</p>
-          <label className="switch-row">
-            <span>Alerts</span>
-            <input className="switch" type="checkbox" checked={book.me.notifyEnabled} onChange={(event) => void book.setReminders(event.target.checked)} />
-          </label>
-          <label className="field">
-            <span>Time</span>
-            <input
-              type="time"
-              value={time}
-              onChange={(event) => {
-                const [hour, minute] = event.target.value.split(":").map(Number);
-                if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
-                void book.setReminderTime(hour * 60 + minute);
-              }}
-            />
-          </label>
-          <div className="chips">
-            {REMINDER_SHORTCUTS.map((minute) => (
-              <button
-                key={minute}
-                type="button"
-                className={`chip ${book.me?.notifyMinute === minute ? "on" : ""}`}
-                onClick={() => void book.setReminderTime(minute)}
-              >
-                {clock(minute)}
-              </button>
-            ))}
-          </div>
-          <p className="hint">
-            {book.pushReady
-              ? "Add BPH to your home screen so the alert can arrive while the app is closed."
-              : "Alerts show while BPH is open. Closed-app alerts are not set up on this server yet."}
-          </p>
-          <p className="meta">Time zone · {book.me.timezone}</p>
-          {phoneZone() !== book.me.timezone ? (
-            <button className="linkish" type="button" onClick={() => void book.usePhoneZone()}>
-              Use this phone's time zone
-            </button>
-          ) : null}
-          <div className="push-preview">
-            <div className="push-top">
-              <span>BPH</span>
-              <span>{time}</span>
-            </div>
-            <p className="push-title">Follow-ups</p>
-            <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
-          </div>
         </div>
       </section>
       <section className="part">
@@ -953,6 +897,160 @@ export function AccountScreen() {
           Sign out
         </button>
       </section>
+    </div>
+  );
+}
+
+export function MemberScreen() {
+  const book = useBook();
+  if (!book.me) return null;
+  const me = book.me;
+  const person = book.profiles.find((profile) => profile.id === book.memberId && !profile.removedAt);
+  if (!person) {
+    return (
+      <div className="settings">
+        <section className="part">
+          <div className="card-block">
+            <h2>This person is no longer on the team.</h2>
+          </div>
+        </section>
+      </div>
+    );
+  }
+  const mine = person.id === me.id;
+  const owned = book.leads.filter((lead) => !lead.deletedAt && lead.ownerId === person.id);
+  const today = todayISO(person.timezone || me.timezone);
+  const open = owned.filter((lead) => lead.status === "lead").length;
+  const counts = digestCounts(owned, today);
+  const sold = soldThisMonth(owned, today);
+  const lost = owned.filter((lead) => lead.status === "lost").length;
+  const time = clock(person.notifyMinute);
+  const teamCounts = digestCounts(book.leads, todayISO(me.timezone));
+  const line = digestLine(teamCounts.today, teamCounts.overdue);
+  return (
+    <div className="settings">
+      <section className="part">
+        <div className="card-block profile-hero">
+          <span className="avatar round" style={{ background: tone(person.displayName) }}>
+            {initials(person.displayName)}
+          </span>
+          <h2>{person.displayName}</h2>
+          <p className="meta">
+            {person.role === "owner" ? "Owner" : "Member"}
+            {mine && book.email ? ` · ${book.email}` : ""}
+          </p>
+        </div>
+      </section>
+      <section className="part">
+        <p className="part-label">Stats</p>
+        <div className="stat-grid">
+          <div className="stat">
+            <b>{open}</b>
+            <span>Open</span>
+          </div>
+          <div className="stat">
+            <b>{counts.today}</b>
+            <span>Due today</span>
+          </div>
+          <div className="stat">
+            <b>{counts.overdue}</b>
+            <span>Overdue</span>
+          </div>
+          <div className="stat">
+            <b>{sold.count}</b>
+            <span>Sold this month</span>
+          </div>
+          <div className="stat">
+            <b>৳{sold.amount}</b>
+            <span>Sold amount</span>
+          </div>
+          <div className="stat">
+            <b>{lost}</b>
+            <span>Lost</span>
+          </div>
+        </div>
+      </section>
+      <section className="part">
+        <p className="part-label">Reminders</p>
+        <div className="card-block">
+          <h2>Daily alert</h2>
+          {mine ? (
+            <>
+              <p className="meta">One alert for the team's overdue follow-ups and anything due that day.</p>
+              <label className="switch-row">
+                <span>Alerts</span>
+                <input
+                  className="switch"
+                  type="checkbox"
+                  checked={person.notifyEnabled}
+                  onChange={(event) => void book.setReminders(event.target.checked)}
+                />
+              </label>
+              <label className="field">
+                <span>Time</span>
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(event) => {
+                    const [hour, minute] = event.target.value.split(":").map(Number);
+                    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+                    void book.setReminderTime(hour * 60 + minute);
+                  }}
+                />
+              </label>
+              <div className="chips">
+                {REMINDER_SHORTCUTS.map((minute) => (
+                  <button
+                    key={minute}
+                    type="button"
+                    className={`chip ${person.notifyMinute === minute ? "on" : ""}`}
+                    onClick={() => void book.setReminderTime(minute)}
+                  >
+                    {clock(minute)}
+                  </button>
+                ))}
+              </div>
+              <p className="hint">
+                {book.pushReady
+                  ? "Add BPH to your home screen so the alert can arrive while the app is closed."
+                  : "Alerts show while BPH is open. Closed-app alerts are not set up on this server yet."}
+              </p>
+              <p className="meta">Time zone · {person.timezone}</p>
+              {phoneZone() !== person.timezone ? (
+                <button className="linkish" type="button" onClick={() => void book.usePhoneZone()}>
+                  Use this phone's time zone
+                </button>
+              ) : null}
+              <div className="push-preview">
+                <div className="push-top">
+                  <span>BPH</span>
+                  <span>{time}</span>
+                </div>
+                <p className="push-title">Follow-ups</p>
+                <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="meta">{person.notifyEnabled ? "Alerts on" : "Alerts off"} · {time}</p>
+              <p className="meta">Time zone · {person.timezone}</p>
+            </>
+          )}
+        </div>
+      </section>
+      {me.role === "owner" && !mine ? (
+        <section className="part">
+          <p className="part-label">Owner</p>
+          <div className="card-block">
+            <button className="linkish" type="button" onClick={() => book.transferOwner(person.id)}>
+              Make owner
+            </button>
+            <button className="delete-link" type="button" onClick={() => book.removeMember(person.id)}>
+              Remove from team
+            </button>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

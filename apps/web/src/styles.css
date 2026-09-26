@@ -848,6 +848,96 @@ h1 {
 .settings-hero h2 { margin: 0; }
 .settings-hero .meta { margin: 2px 0 0; }
 .settings-avatar { width: 48px; height: 48px; border-radius: 16px; font-size: 15px; }
+
+.team-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 8px 2px 4px;
+  margin: 0 -4px;
+  scrollbar-width: none;
+}
+.team-scroll::-webkit-scrollbar { display: none; }
+.team-person {
+  width: 76px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+}
+.team-person:active { transform: scale(0.96); }
+.team-person .avatar,
+.avatar.round {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  font-size: 18px;
+}
+.team-person strong {
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+.team-person em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+button.card-block,
+button.member-open {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 18px 14px;
+}
+.profile-hero h2 { margin: 0; }
+.profile-hero .meta { margin: 0; }
+.profile-hero .avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  font-size: 28px;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+.stat b {
+  display: block;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+.stat span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
 .about-block { text-align: left; }
 .version {
   margin: 0;

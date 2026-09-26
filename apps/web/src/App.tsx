@@ -12,6 +12,7 @@ import {
   EditScreen,
   JoinScreen,
   LeadsScreen,
+  MemberScreen,
   OpeningScreen,
   SignupScreen,
   StartScreen,
@@ -161,12 +162,12 @@ function Shell() {
               <span className="header-side" />
             )}
           </>
-        ) : book.screen === "account" ? (
+        ) : book.screen === "account" || book.screen === "member" ? (
           <>
             <button className="icon-btn header-side" type="button" aria-label="Back" onClick={book.back}>
               <IconBack />
             </button>
-            <p className="header-title">Settings</p>
+            <p className="header-title">{book.screen === "member" ? "Profile" : "Settings"}</p>
             <span className="header-side" />
           </>
         ) : (
@@ -201,6 +202,7 @@ function Shell() {
         {book.phase === "app" && book.screen === "today" ? <TodayScreen /> : null}
         {book.phase === "app" && book.screen === "leads" ? <LeadsScreen /> : null}
         {book.phase === "app" && book.screen === "account" ? <AccountScreen /> : null}
+        {book.phase === "app" && book.screen === "member" ? <MemberScreen /> : null}
         {book.phase === "app" && book.screen === "detail" ? <DetailScreen /> : null}
         {book.phase === "app" && book.screen === "edit" ? <EditScreen /> : null}
         </div>
