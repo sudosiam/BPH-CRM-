@@ -4,7 +4,26 @@
   "installCommand": "npm install --prefix ../.. --include=dev",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/crm",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    { "source": "/crm", "destination": "/index.html" },
+    { "source": "/crm/", "destination": "/index.html" },
+    { "source": "/crm/:path*", "destination": "/:path*" }
+  ],
   "headers": [
+    {
+      "source": "/crm/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/crm/" }
+      ]
+    },
     {
       "source": "/sw.js",
       "headers": [

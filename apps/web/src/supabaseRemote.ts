@@ -94,6 +94,10 @@ function missingColumn(error: { message?: string } | null) {
   return /column|schema cache/i.test(error?.message || "");
 }
 
+function appReturnUrl() {
+  return new URL(import.meta.env.BASE_URL || "/", window.location.origin).href;
+}
+
 function isNetworkError(error: { message?: string } | null) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("fetch") || message.includes("network") || message.includes("offline") || message.includes("load failed");
@@ -192,7 +196,7 @@ export function createSupabaseRemote() {
         password,
         options: {
           data: { display_name: displayName },
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: appReturnUrl(),
         },
       });
       if (error) throw new Error(error.message);
@@ -255,7 +259,7 @@ export function createSupabaseRemote() {
       if (error) throw new Error(error.message);
     },
     async requestPasswordReset(email: string) {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: appReturnUrl() });
       if (error) throw new Error(error.message);
       return { sent: true, message: "Check your email for a link to choose a new password." };
     },

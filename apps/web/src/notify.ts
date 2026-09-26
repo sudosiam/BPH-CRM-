@@ -15,7 +15,7 @@ function urlBase64ToUint8Array(value: string) {
 
 async function pushRegistration() {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
-  const registration = await navigator.serviceWorker.getRegistration();
+  const registration = await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL);
   if (!registration) return null;
   if (registration.active) return registration;
   return Promise.race([
@@ -74,7 +74,7 @@ function withTimeout<T>(work: Promise<T>, ms: number) {
 }
 
 async function showLocalTest() {
-  const options = { body: TEST_BODY, icon: "/icon-192.png", data: { url: "/" } };
+  const options = { body: TEST_BODY, icon: `${import.meta.env.BASE_URL}icon-192.png`, data: { url: import.meta.env.BASE_URL } };
   const registration = await pushRegistration();
   if (registration) {
     try {
@@ -133,6 +133,6 @@ export async function maybeLocalDigest(leads: Lead[], me: Profile | null, pushAc
     return;
   }
   const body = digestLine(counts.today, counts.overdue);
-  new Notification("Follow-ups", { body, icon: "/icon-192.png" });
+  new Notification("Follow-ups", { body, icon: `${import.meta.env.BASE_URL}icon-192.png` });
   localStorage.setItem(digestKey(me), today);
 }
