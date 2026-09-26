@@ -35,6 +35,7 @@ html, body {
   line-height: 1.4;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 #root {
@@ -201,8 +202,8 @@ a { color: inherit; }
 .sync-label.saved::before { background: var(--overdue); }
 
 .settings-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 0;
   border-radius: 999px;
   background: var(--card);
@@ -308,7 +309,7 @@ h1 {
 .scope button, .segments button, .status-switch button, .chip {
   border: 1px solid var(--line);
   background: transparent;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
   border-radius: 999px;
   font-weight: 700;
@@ -336,7 +337,7 @@ h1 {
   border: 0;
   background: transparent;
   border-radius: 12px;
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 8px;
   white-space: nowrap;
   color: var(--muted);
@@ -374,6 +375,8 @@ h1 {
   gap: 4px;
   padding-right: 12px;
   border-top: 1px solid var(--line);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 76px;
 }
 
 .row:first-child { border-top: 0; }
@@ -433,7 +436,7 @@ h1 {
 }
 
 .call {
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 14px;
   background: var(--green-soft);
   color: var(--green-ink);
@@ -978,12 +981,11 @@ h1 {
   bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  background: rgba(255, 253, 248, 0.92);
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 22px;
   padding-bottom: 0;
   z-index: 5;
-  backdrop-filter: blur(16px);
   box-shadow: 0 12px 32px rgba(40, 32, 20, 0.1);
 }
 
@@ -1041,11 +1043,17 @@ h1 {
 
 #fab svg { width: 24px; height: 24px; }
 
-.row-open, #fab, .primary, .chip, .call, .tab {
-  transition: transform 140ms ease, background 140ms ease;
+button, a, .chip, .row-open, .tab, .menu-row, .settings-btn, .team-person, .signout-row, .linkish {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.row-open:active, #fab:active, .primary:active, .chip:active, .call:active {
-  transform: scale(0.97);
+button, a.call, .chip, .row-open, .tab, .menu-row, .settings-btn, .team-person, .signout-row, #fab, .primary {
+  transition: transform 70ms ease, background-color 70ms ease;
+}
+button:active, a.call:active, .chip:active, .row-open:active, .tab:active, .menu-row:active, .settings-btn:active, .team-person:active, .signout-row:active, #fab:active, .primary:active {
+  transform: scale(0.96);
+  transition-duration: 20ms;
 }
 
 .part { margin-top: 22px; }
@@ -1403,5 +1411,5 @@ button.member-open {
 #view.with-fab { padding-bottom: calc(156px + var(--safe-bottom)); }
 
 @media (prefers-reduced-motion: reduce) {
-  #boot-bar, .boot-mark span { transition: none; animation: none; }
+  #boot-bar, .boot-mark span, button, a.call, .chip, .row-open, .tab, #fab { transition: none; animation: none; }
 }

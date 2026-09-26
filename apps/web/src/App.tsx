@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { BookProvider, useBook } from "./book";
 import { IconBack, IconCustomers, IconLeads, IconPlus, IconSettings, IconToday } from "./icons";
 import { digestCounts, syncStatusLabel, todayISO } from "@shared/book.mjs";
@@ -67,45 +67,50 @@ function Shell() {
   const badge = dueCounts.today + dueCounts.overdue;
   const syncLabel = syncStatusLabel(book.sync, book.syncedAt);
   const lead = book.leads.find((item) => item.id === book.detailId);
-  const [shift, setShift] = useState(0);
-  const [dragging, setDragging] = useState(false);
   const drag = useRef<{ x: number; y: number; pointerId: number; armed: boolean } | null>(null);
   const shiftRef = useRef(0);
   const swipeLock = useRef(false);
   const edgeRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef(book.back);
+  const sheetOpen = useRef(Boolean(book.sheet));
+  backRef.current = book.back;
+  sheetOpen.current = Boolean(book.sheet);
 
   useSystemBack(book.phase === "app" ? book.navDepth : 0, () => {
     if (book.sheet) book.setSheet(null);
     else book.back();
   });
 
-  function moveShift(next: number) {
+  function paintShift(next: number, animate: boolean) {
     shiftRef.current = next;
-    setShift(next);
-  }
-
-  function endSwipe(commit: boolean) {
-    const gone = commit && shiftRef.current >= 96;
-    drag.current = null;
-    setDragging(false);
-    moveShift(0);
-    if (!gone || swipeLock.current) return;
-    swipeLock.current = true;
-    if (book.sheet) book.setSheet(null);
-    else book.back();
-    window.setTimeout(() => {
-      swipeLock.current = false;
-    }, 420);
+    const page = pageRef.current;
+    if (!page) return;
+    page.style.transition = animate ? "transform 120ms ease" : "none";
+    page.style.transform = next > 0 ? `translate3d(${next}px,0,0)` : "";
   }
 
   useEffect(() => {
     viewRef.current?.scrollTo(0, 0);
+    paintShift(0, false);
   }, [book.screen, book.phase]);
 
   useEffect(() => {
     const edge = edgeRef.current;
     if (!edge || book.navDepth < 1) return;
+    const finish = (commit: boolean) => {
+      const gone = commit && shiftRef.current >= 96;
+      drag.current = null;
+      paintShift(0, true);
+      if (!gone || swipeLock.current) return;
+      swipeLock.current = true;
+      if (sheetOpen.current) book.setSheet(null);
+      else backRef.current();
+      window.setTimeout(() => {
+        swipeLock.current = false;
+      }, 240);
+    };
     const onDown = (event: PointerEvent) => {
       if (event.button !== 0 || swipeLock.current) return;
       const target = event.target;
@@ -120,21 +125,19 @@ function Shell() {
       if (!start.armed) {
         if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {
           drag.current = null;
-          setDragging(false);
-          moveShift(0);
+          paintShift(0, false);
           return;
         }
         if (dx < 12 || Math.abs(dx) <= Math.abs(dy)) return;
         start.armed = true;
-        setDragging(true);
       }
-      moveShift(Math.max(0, Math.min(dx, 168)));
+      paintShift(Math.max(0, Math.min(dx, 168)), false);
     };
     const onUp = (event: PointerEvent) => {
       if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-      endSwipe(true);
+      finish(true);
     };
-    const onCancel = () => endSwipe(false);
+    const onCancel = () => finish(false);
     edge.addEventListener("pointerdown", onDown, { passive: true });
     edge.addEventListener("pointermove", onMove, { passive: true });
     edge.addEventListener("pointerup", onUp, { passive: true });
@@ -145,7 +148,7 @@ function Shell() {
       edge.removeEventListener("pointerup", onUp);
       edge.removeEventListener("pointercancel", onCancel);
     };
-  }, [book.navDepth, book.sheet, book.back]);
+  }, [book.navDepth, book.setSheet]);
 
   return (
     <div id="app">
@@ -192,13 +195,7 @@ function Shell() {
       </header>
       {book.navDepth > 0 ? <div className="edge-swipe" ref={edgeRef} /> : null}
       <main ref={viewRef} id="view" className={`${tabbed ? "with-tabs" : ""} ${tabbed && showFab ? "with-fab" : ""}`}>
-        <div
-          id="page"
-          style={{
-            transform: shift ? `translate3d(${shift}px, 0, 0)` : undefined,
-            transition: dragging ? "none" : "transform 180ms ease",
-          }}
-        >
+        <div id="page" ref={pageRef}>
         {book.phase === "loading" ? <OpeningScreen /> : null}
         {book.phase === "auth" ? <AuthScreen /> : null}
         {book.phase === "signup" ? <SignupScreen /> : null}

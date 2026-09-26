@@ -36,7 +36,6 @@ export async function runFullSync(onProgress?: (pct: number, label: string) => v
   if (current) await db.meta.put({ ...current, fullSyncComplete: true, cursor: second.serverTime, org: second.org });
   const count = await db.leads.filter((lead) => !lead.deletedAt).count();
   onProgress?.(100, `${count} ${count === 1 ? "lead" : "leads"} on this phone`);
-  await new Promise((resolve) => window.setTimeout(resolve, 320));
 }
 
 export async function runIncremental() {

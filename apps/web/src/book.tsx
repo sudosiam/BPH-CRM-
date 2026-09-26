@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
@@ -149,6 +149,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [undoRun, setUndoRun] = useState<(() => Promise<void>) | null>(null);
   const undoToken = useRef(0);
   const testAlertBusy = useRef(false);
+  const waSave = useRef(0);
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -164,9 +165,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
   const [pushActive, setPushActive] = useState(false);
   const [waTemplate, setWaTemplateState] = useState(readWaTemplate);
-  const leads = (useLiveQuery(() => db.leads.toArray(), [], []) ?? [])
-    .filter((lead) => !lead.deletedAt)
-    .map((lead) => ({ ...lead, tags: normalizeTags(lead.tags) }));
+  const storedLeads = useLiveQuery(() => db.leads.toArray(), [], []) ?? [];
+  const leads = useMemo(
+    () => storedLeads.filter((lead) => !lead.deletedAt).map((lead) => ({ ...lead, tags: normalizeTags(lead.tags) })),
+    [storedLeads],
+  );
   const profiles = useLiveQuery(() => db.profiles.toArray(), [], []) ?? [];
   const outboxCount = useLiveQuery(() => db.outbox.count(), [], 0) ?? 0;
   const meta = useLiveQuery(() => db.meta.get("local"), []);
@@ -874,12 +877,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
       } catch {
         /* Private browsing can block storage. The template still applies until refresh. */
       }
-      if (me?.role === "owner") {
+      if (me?.role !== "owner") return;
+      window.clearTimeout(waSave.current);
+      waSave.current = window.setTimeout(() => {
         void remote.setWaTemplate(next).then(async (saved) => {
           const current = await db.meta.get("local");
           if (current?.org) await db.meta.put({ ...current, org: { ...current.org, waTemplate: saved } });
         }).catch(() => {});
-      }
+      }, 400);
     },
     regenerateCode() {
       setSheet("code");
