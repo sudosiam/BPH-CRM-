@@ -41,6 +41,40 @@ export async function enableNotifications() {
   }
 }
 
+const TEST_TITLE = "BPH";
+const TEST_BODY = "Test alert. Reminders can reach this phone.";
+
+async function showLocalTest() {
+  const options = { body: TEST_BODY, icon: "/icon-192.png", data: { url: "/" } };
+  if ("serviceWorker" in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(TEST_TITLE, options);
+      return;
+    } catch {
+      /* A page notification still proves alerts are allowed. */
+    }
+  }
+  new Notification(TEST_TITLE, options);
+}
+
+export async function showTestNotification() {
+  if (!("Notification" in window)) return "unsupported" as const;
+  const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") return "denied" as const;
+  try {
+    const pushed = await subscribeToPush();
+    if (pushed) {
+      const sent = await remote.sendTestPush();
+      if (sent > 0) return "push" as const;
+    }
+  } catch {
+    /* Show it on this phone when the server cannot deliver a closed-app alert. */
+  }
+  await showLocalTest();
+  return "local" as const;
+}
+
 export function syncBadge(leads: Lead[], me: Profile | null) {
   if (!me || !("setAppBadge" in navigator)) return;
   const today = todayISO(me.timezone);

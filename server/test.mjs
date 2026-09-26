@@ -404,3 +404,26 @@ test("sold amount, source, and the shared message", async () => {
     server.close();
   }
 });
+
+test("a test alert requires a signed-in phone and sends nothing when none is subscribed", async () => {
+  const { server, base } = await boot();
+  try {
+    const guest = await json(base, "/api/push/test", { method: "POST" });
+    assert.equal(guest.status, 401);
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "alert@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    const created = await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    assert.equal(created.status, 200);
+    const none = await json(base, "/api/push/test", { method: "POST", token: owner.data.token });
+    assert.equal(none.status, 200);
+    assert.equal(none.data.sent, 0);
+  } finally {
+    server.close();
+  }
+});

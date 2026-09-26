@@ -4,7 +4,7 @@ import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpRes
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
-import { enableNotifications, maybeLocalDigest, syncBadge } from "./notify";
+import { enableNotifications, maybeLocalDigest, showTestNotification, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
 import { enqueueSync, flushOutbox, queueLead, runFullSync, runIncremental, saveMeta } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
@@ -85,6 +85,7 @@ type BookValue = {
   snoozeReminder: () => void;
   setReminders: (enabled: boolean) => Promise<void>;
   setReminderTime: (minute: number) => Promise<void>;
+  sendTestAlert: () => Promise<void>;
   waTemplate: string;
   setWaTemplate: (value: string) => void;
   regenerateCode: () => void;
@@ -140,6 +141,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const [undo, setUndo] = useState("");
   const [undoRun, setUndoRun] = useState<(() => Promise<void>) | null>(null);
   const undoToken = useRef(0);
+  const testAlertBusy = useRef(false);
   const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -830,6 +832,21 @@ export function BookProvider({ children }: { children: ReactNode }) {
       const next = Math.max(0, Math.min(1439, Math.round(minute)));
       const profile = await remote.updateProfile({ ...me, notifyMinute: next });
       await db.profiles.put(profile);
+    },
+    async sendTestAlert() {
+      if (testAlertBusy.current) return;
+      testAlertBusy.current = true;
+      try {
+        const result = await showTestNotification();
+        if (result === "denied") showToast("Allow alerts to send a test.");
+        else if (result === "unsupported") showToast("This phone cannot show alerts.");
+        else if (result === "push") showToast("Test alert sent. Close the app to see it.");
+        else showToast("Test alert shown on this phone.");
+      } catch {
+        showToast("Could not send a test alert.");
+      } finally {
+        testAlertBusy.current = false;
+      }
     },
     waTemplate,
     setWaTemplate(value) {

@@ -326,6 +326,12 @@ export function createSupabaseRemote() {
     async vapidPublicKey() {
       return import.meta.env.VITE_VAPID_PUBLIC_KEY || null;
     },
+    async sendTestPush() {
+      const { data, error } = await supabase.functions.invoke("test-push", { body: {} });
+      if (error) throw new Error(error.message || "Could not send a test alert.");
+      const sent = data && typeof data === "object" && "sent" in data ? Number(data.sent) : 0;
+      return Number.isFinite(sent) ? sent : 0;
+    },
     async saveSubscription(subscription: PushSubscriptionJSON) {
       const userId = (await supabase.auth.getUser()).data.user?.id;
       const saved = await supabase.rpc("save_push_subscription", {

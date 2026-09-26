@@ -659,6 +659,31 @@ export function createBook(dataFile) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/push/test") {
+      const subs = state.subscriptions.filter((item) => item.userId === auth.user.id);
+      let sent = 0;
+      const dead = [];
+      for (const sub of subs) {
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: sub.keys },
+            JSON.stringify({ title: "BPH", body: "Test alert. Reminders can reach this phone." }),
+          );
+          sent += 1;
+        } catch (error) {
+          if (error.statusCode === 404 || error.statusCode === 410) dead.push(sub.endpoint);
+        }
+      }
+      if (dead.length) {
+        await mutate(async () => {
+          state.subscriptions = state.subscriptions.filter((item) => !dead.includes(item.endpoint));
+          persist();
+        });
+      }
+      send(res, 200, { sent });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/push/subscribe") {
       const body = await readJson(req);
       if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {

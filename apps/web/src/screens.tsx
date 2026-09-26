@@ -1069,6 +1069,10 @@ export function MemberScreen() {
                 <p className="push-title">Follow-ups</p>
                 <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
               </div>
+              <button className="ghost wide" type="button" onClick={() => void book.sendTestAlert()}>
+                Send a test alert
+              </button>
+              <p className="hint">Sends one alert to this phone right now. Reminders can stay off.</p>
             </>
           ) : (
             <>

@@ -146,6 +146,11 @@ export function createHttpRemote() {
       if (!response.ok) return null;
       return (data.publicKey as string) || null;
     },
+    async sendTestPush() {
+      const { response, data } = await request("/api/push/test", { method: "POST", body: "{}" });
+      if (!response.ok) throw new Error(data.error || "Could not send a test alert.");
+      return Number(data.sent ?? 0);
+    },
     async saveSubscription(subscription: PushSubscriptionJSON) {
       const { response, data } = await request("/api/push/subscribe", {
         method: "POST",
