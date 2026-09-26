@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { BookProvider, useBook } from "./book";
 import { IconBack, IconCustomers, IconLeads, IconPlus, IconSettings, IconToday } from "./icons";
-import { digestCounts, syncStatusLabel, todayISO } from "@shared/book.mjs";
+import { digestCounts, initials, syncStatusLabel, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
   AuthScreen,
@@ -20,6 +20,14 @@ import {
   StartScreen,
   TodayScreen,
 } from "./screens";
+
+const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
+
+function tone(name: string) {
+  let hash = 0;
+  for (const char of name) hash = (hash + char.charCodeAt(0)) % TONES.length;
+  return TONES[hash];
+}
 
 function useSystemBack(depth: number, onBack: () => void) {
   const onBackRef = useRef(onBack);
@@ -67,6 +75,7 @@ function Shell() {
   const badge = dueCounts.today + dueCounts.overdue;
   const syncLabel = syncStatusLabel(book.sync, book.syncedAt);
   const lead = book.leads.find((item) => item.id === book.detailId);
+  const me = book.me;
   const drag = useRef<{ x: number; y: number; pointerId: number; armed: boolean } | null>(null);
   const shiftRef = useRef(0);
   const swipeLock = useRef(false);
@@ -189,6 +198,17 @@ function Shell() {
               <button className="settings-btn" type="button" aria-label="Settings" onClick={book.openSettings}>
                 <IconSettings />
               </button>
+              {me ? (
+                <button
+                  className="profile-btn"
+                  type="button"
+                  aria-label="Profile"
+                  style={{ background: tone(me.displayName) }}
+                  onClick={() => book.openMember(me.id)}
+                >
+                  {initials(me.displayName)}
+                </button>
+              ) : null}
             </div>
           </>
         )}
