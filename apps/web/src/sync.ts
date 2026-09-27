@@ -28,9 +28,20 @@ export type ProfilePatch = {
   notifyMinute?: number;
 };
 
+const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+export function tombstoneFresh(deletedAt: string | null, now = Date.now()) {
+  if (!deletedAt) return false;
+  const at = Date.parse(deletedAt);
+  return Number.isFinite(at) && now - at < RETENTION_MS;
+}
+
 export async function applyPull(payload: Awaited<ReturnType<typeof remote.pull>>, replaceAll: boolean) {
   await db.transaction("rw", db.leads, db.profiles, db.meta, db.outbox, async () => {
     const pending = new Set((await db.outbox.toArray()).map((item) => item.id));
+    for (const id of payload.expiredIds ?? []) {
+      if (!pending.has(id)) await db.leads.delete(id);
+    }
     if (replaceAll) {
       const local = await db.leads.toArray();
       const remoteIds = new Set(payload.leads.map((lead) => lead.id));
@@ -40,7 +51,7 @@ export async function applyPull(payload: Awaited<ReturnType<typeof remote.pull>>
     }
     for (const lead of payload.leads) {
       if (pending.has(lead.id)) continue;
-      if (lead.deletedAt) await db.leads.delete(lead.id);
+      if (lead.deletedAt && !tombstoneFresh(lead.deletedAt)) await db.leads.delete(lead.id);
       else await db.leads.put(lead);
     }
     await db.profiles.clear();
@@ -280,7 +291,7 @@ async function settlePush(
   const current = await db.outbox.get(item.id);
   if (!result.ok) return false;
   if (!current || current.rev === item.rev) {
-    if (result.lead.deletedAt) await db.leads.delete(item.id);
+    if (result.lead.deletedAt && !tombstoneFresh(result.lead.deletedAt)) await db.leads.delete(item.id);
     else await db.leads.put(result.lead);
     await db.outbox.delete(item.id);
   } else {
@@ -333,9 +344,13 @@ export async function flushOutbox(
           }
         }
         const kept = result.ok ? null : result.lead;
-        if (!kept || kept.deletedAt || (!result.ok && result.deleted)) {
+        if (!kept) {
           await db.leads.delete(item.id);
           onNotice("This lead was deleted.");
+        } else if (kept.deletedAt) {
+          if (tombstoneFresh(kept.deletedAt)) await db.leads.put(kept);
+          else await db.leads.delete(item.id);
+          if (!lead.deletedAt) onNotice("This lead was deleted.");
         } else if (lead.deletedAt && !kept.deletedAt) {
           await db.leads.put(kept);
           const actor = (await db.profiles.get(kept.updatedBy))?.displayName ?? "someone";

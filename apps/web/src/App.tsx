@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import { BookProvider, useBook } from "./book";
-import { IconBack, IconCustomers, IconLeads, IconPerson, IconPlus, IconSettings, IconToday } from "./icons";
+import { IconBack, IconBin, IconCustomers, IconLeads, IconPerson, IconPlus, IconSettings, IconToday } from "./icons";
 import { digestCounts, syncStatusLabel, todayISO } from "@shared/book.mjs";
 import {
   AccountScreen,
+  BinScreen,
   AuthScreen,
   PasswordScreen,
   ResetScreen,
@@ -180,15 +181,21 @@ function Shell() {
               <span className="header-side" />
             )}
           </>
-        ) : book.screen === "account" || book.screen === "member" || book.screen === "message" ? (
+        ) : book.screen === "account" || book.screen === "member" || book.screen === "message" || book.screen === "bin" ? (
           <>
             <button className="icon-btn header-side" type="button" aria-label="Back" onClick={book.back}>
               <IconBack />
             </button>
             <p className="header-title">
-              {book.screen === "member" ? "Profile" : book.screen === "message" ? "WhatsApp Message" : "Settings"}
+              {book.screen === "member" ? "Profile" : book.screen === "message" ? "WhatsApp Message" : book.screen === "bin" ? "Recycle bin" : "Settings"}
             </p>
-            <span className="header-side" />
+            {book.screen === "account" ? (
+              <button className="icon-btn header-side" type="button" aria-label="Recycle bin" onClick={book.openBin}>
+                <IconBin />
+              </button>
+            ) : (
+              <span className="header-side" />
+            )}
           </>
         ) : (
           <>
@@ -228,6 +235,7 @@ function Shell() {
         {book.phase === "app" && book.screen === "leads" ? <LeadsScreen /> : null}
         {book.phase === "app" && book.screen === "customers" ? <CustomersScreen /> : null}
         {book.phase === "app" && book.screen === "account" ? <AccountScreen /> : null}
+        {book.phase === "app" && book.screen === "bin" ? <BinScreen /> : null}
         {book.phase === "app" && book.screen === "member" ? <MemberScreen /> : null}
         {book.phase === "app" && book.screen === "message" ? <MessageScreen /> : null}
         {book.phase === "app" && book.screen === "detail" ? <DetailScreen /> : null}

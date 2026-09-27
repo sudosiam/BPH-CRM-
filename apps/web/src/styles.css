@@ -465,7 +465,9 @@ h1 {
   margin-right: auto;
 }
 .bulk-line .chip.danger-chip { color: var(--overdue); }
+.bulk-line .bin-empty { margin-left: auto; }
 .bulk-line button:disabled { opacity: 0.4; }
+.row .text-btn { flex: 0 0 auto; }
 .pick {
   width: 22px;
   height: 22px;

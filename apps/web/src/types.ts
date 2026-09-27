@@ -55,6 +55,7 @@ export type Pull = {
   leads: Lead[];
   profiles: Profile[];
   org: Org;
+  expiredIds?: string[];
 };
 
 export type PushResult =

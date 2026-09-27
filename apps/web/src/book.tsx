@@ -6,11 +6,11 @@ import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, showTestNotification, subscribeToPush, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
-import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, restoreLeadNow, runFullSync, runIncremental, saveMeta } from "./sync";
+import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow, queueLead, queueProfile, restoreLeadNow, runFullSync, runIncremental, saveMeta, tombstoneFresh } from "./sync";
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
-type Screen = "today" | "leads" | "customers" | "account" | "member" | "message" | "detail" | "edit";
+type Screen = "today" | "leads" | "customers" | "account" | "member" | "message" | "bin" | "detail" | "edit";
 
 function rootOf(stack: Screen[]): "today" | "leads" | "customers" {
   return stack.find((screen) => screen === "today" || screen === "leads" || screen === "customers") ?? "today";
@@ -38,6 +38,7 @@ type BookValue = {
   phase: Phase;
   screen: Screen;
   leads: Lead[];
+  trashed: Lead[];
   profiles: Profile[];
   me: Profile | null;
   org: Org | null;
@@ -68,6 +69,9 @@ type BookValue = {
   goTab: (screen: "today" | "leads" | "customers") => void;
   root: "today" | "leads" | "customers";
   openSettings: () => void;
+  openBin: () => void;
+  restoreDeleted: (ids: string[]) => Promise<void>;
+  emptyDeleted: (ids: string[]) => Promise<void>;
   openMessage: () => void;
   openLead: (id: string) => void;
   openMember: (id: string) => void;
@@ -236,6 +240,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const storedLeads = useLiveQuery(() => db.leads.toArray(), [], []) ?? [];
   const leads = useMemo(
     () => storedLeads.filter((lead) => !lead.deletedAt).map((lead) => ({ ...lead, tags: normalizeTags(lead.tags) })),
+    [storedLeads],
+  );
+  const trashed = useMemo(
+    () =>
+      storedLeads
+        .filter((lead) => tombstoneFresh(lead.deletedAt))
+        .map((lead) => ({ ...lead, tags: normalizeTags(lead.tags) }))
+        .sort((a, b) => (a.deletedAt ?? "") < (b.deletedAt ?? "") ? 1 : -1),
     [storedLeads],
   );
   const profiles = useLiveQuery(() => db.profiles.toArray(), [], []) ?? [];
@@ -768,6 +780,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     phase,
     screen,
     leads,
+    trashed,
     profiles,
     me,
     org,
@@ -801,6 +814,14 @@ export function BookProvider({ children }: { children: ReactNode }) {
         return [root, "account"];
       });
       setSheet(null);
+    },
+    openBin() {
+      setStack((current) => {
+        const root = rootOf(current);
+        return [root, "account", "bin"];
+      });
+      setSheet(null);
+      void syncNow({ force: true });
     },
     openMessage() {
       setStack((current) => [...current, "message"]);
@@ -1111,6 +1132,31 @@ export function BookProvider({ children }: { children: ReactNode }) {
       offerUndo(count === 1 ? "Lead deleted" : `${count} leads deleted`, async () => {
         for (const snapshot of snapshots) await restoreLead(snapshot);
       });
+    },
+    async restoreDeleted(ids) {
+      if (!me || !ids.length) return;
+      let count = 0;
+      for (const id of ids) {
+        const current = await db.leads.get(id);
+        if (!current?.deletedAt) continue;
+        await restoreLeadNow(current, me.id);
+        count += 1;
+      }
+      if (!count) return;
+      scheduleSync();
+      showToast(count === 1 ? "Lead restored" : `${count} leads restored`);
+    },
+    async emptyDeleted(ids) {
+      if (!me || !ids.length) return;
+      const expired = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
+      let count = 0;
+      for (const id of ids) {
+        const changed = await patchLeadNow(id, (current) => (current.deletedAt ? { deletedAt: expired } : null), me.id);
+        if (changed) count += 1;
+      }
+      if (!count) return;
+      scheduleSync();
+      showToast(count === 1 ? "Removed for good" : `${count} removed for good`);
     },
     async setReminders(enabled) {
       if (!me) return;

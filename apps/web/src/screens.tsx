@@ -1165,6 +1165,148 @@ function teamMembers(profiles: Profile[], meId: string) {
     });
 }
 
+function daysLeft(deletedAt: string, today: string) {
+  const age = -dayDiff(deletedAt.slice(0, 10), today);
+  return Math.max(0, Math.min(90, 90 - age));
+}
+
+export function BinScreen() {
+  const book = useBook();
+  const today = todayISO(book.me?.timezone);
+  const rows = book.trashed;
+  const ids = rows.map((lead) => lead.id);
+  const [on, setOn] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [ask, setAsk] = useState<null | "empty" | "chosen">(null);
+  const [busy, setBusy] = useState(false);
+  const chosen = ids.filter((id) => picked.has(id));
+  const allOn = ids.length > 0 && chosen.length === ids.length;
+
+  function done() {
+    setOn(false);
+    setPicked(new Set());
+    setAsk(null);
+  }
+
+  function toggle(id: string) {
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function confirm() {
+    const target = ask === "empty" ? ids : chosen;
+    setBusy(true);
+    try {
+      await book.emptyDeleted(target);
+      done();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <p className="meta">Deleted leads stay here for 90 days.</p>
+      {rows.length ? (
+        <div className="bulk-line">
+          {on ? (
+            <>
+              <span className="bulk-count">{chosen.length} selected</span>
+              <button type="button" className="chip" onClick={() => setPicked(allOn ? new Set() : new Set(ids))}>
+                {allOn ? "None" : "All"}
+              </button>
+              <button
+                type="button"
+                className="chip"
+                disabled={!chosen.length}
+                onClick={() => {
+                  void book.restoreDeleted(chosen).then(done);
+                }}
+              >
+                Restore
+              </button>
+              <button type="button" className="chip danger-chip" disabled={!chosen.length} onClick={() => setAsk("chosen")}>
+                Delete
+              </button>
+              <button type="button" className="chip" onClick={done}>
+                Done
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="linkish bulk-start" onClick={() => setOn(true)}>
+                Select
+              </button>
+              <button type="button" className="chip danger-chip bin-empty" onClick={() => setAsk("empty")}>
+                Empty
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {rows.length ? (
+        <div className="group">
+          {rows.map((lead) => {
+            const left = daysLeft(lead.deletedAt || today, today);
+            const isPicked = on && picked.has(lead.id);
+            const copy = (
+              <>
+                {on ? <span className={`pick ${isPicked ? "on" : ""}`} aria-hidden="true" /> : null}
+                <span className="avatar" style={{ background: tone(lead.name) }}>
+                  {initials(lead.name)}
+                </span>
+                <span className="row-copy">
+                  <span className="row-name">{lead.name}</span>
+                  <span className="row-sub quiet">{left === 1 ? "1 day left" : `${left} days left`}</span>
+                </span>
+              </>
+            );
+            return (
+              <div className={`row ${isPicked ? "picked" : ""}`} key={lead.id}>
+                {on ? (
+                  <button className="row-open" type="button" aria-pressed={isPicked} onClick={() => toggle(lead.id)}>
+                    {copy}
+                  </button>
+                ) : (
+                  <div className="row-open">{copy}</div>
+                )}
+                {on ? null : (
+                  <button className="text-btn" type="button" onClick={() => void book.restoreDeleted([lead.id])}>
+                    Restore
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty">
+          <h2>Nothing deleted</h2>
+          <p>Leads you delete stay here for 90 days.</p>
+        </div>
+      )}
+      {ask ? (
+        <div id="sheet" onClick={(event) => event.currentTarget === event.target && !busy && setAsk(null)}>
+          <div className="sheet" role="dialog" aria-modal="true">
+            <h2>{ask === "empty" ? "Empty the recycle bin?" : `Delete ${chosen.length} for good?`}</h2>
+            <p>{ask === "empty" ? "These leads are gone for good." : "They cannot be restored."}</p>
+            <button className="danger" type="button" disabled={busy} onClick={() => void confirm()}>
+              {busy ? "Removing…" : ask === "empty" ? "Empty" : `Delete ${chosen.length}`}
+            </button>
+            <button className="ghost wide" type="button" disabled={busy} onClick={() => setAsk(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function AccountScreen() {
   const book = useBook();
   if (!book.me || !book.org) return null;

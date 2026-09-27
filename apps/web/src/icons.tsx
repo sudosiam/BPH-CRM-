@@ -80,6 +80,17 @@ export function IconDownload() {
   );
 }
 
+export function IconBin() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 8.5h8l-.6 11.2a1.5 1.5 0 0 1-1.5 1.4H10a1.5 1.5 0 0 1-1.5-1.4L8 8.5Z" />
+      <path d="M7 8.5h10" />
+      <path d="M10 8.2V6.2A1.2 1.2 0 0 1 11.2 5h1.6A1.2 1.2 0 0 1 14 6.2v2" />
+      <path d="M12 11.5v5" />
+    </svg>
+  );
+}
+
 export function IconSettings() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
