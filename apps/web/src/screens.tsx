@@ -1452,8 +1452,15 @@ function addedBy(personId: string, leads: Lead[]) {
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.name.localeCompare(b.name)));
 }
 
+const addedSearch = new Map<string, string>();
+
 export function AddedScreen() {
   const book = useBook();
+  const personId = book.memberId || "";
+  const [query, setQuery] = useState(() => addedSearch.get(personId) || "");
+  useEffect(() => {
+    addedSearch.set(personId, query);
+  }, [personId, query]);
   if (!book.me) return null;
   const person = book.profiles.find((profile) => profile.id === book.memberId && !profile.removedAt);
   if (!person) {
@@ -1469,21 +1476,41 @@ export function AddedScreen() {
   }
   const today = todayISO(person.timezone || book.me.timezone);
   const added = addedBy(person.id, book.leads);
+  const needle = query.trim().toLowerCase();
+  const rows = needle
+    ? added.filter((lead) => `${lead.name} ${lead.phone} ${lead.notes}`.toLowerCase().includes(needle))
+    : added;
+  const countLabel = needle
+    ? `${rows.length} of ${added.length}`
+    : added.length === 1
+      ? "1 lead"
+      : `${added.length} leads`;
   return (
     <>
       <p className="added-who">
-        {person.displayName}
-        <span>{added.length === 1 ? "1 lead" : `${added.length} leads`}</span>
+        <b>{person.displayName}</b>
+        <span>{countLabel}</span>
       </p>
       {added.length ? (
+        <input
+          className="search"
+          type="search"
+          placeholder="Search name, phone, or notes"
+          value={query}
+          autoComplete="off"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      ) : null}
+      {rows.length ? (
         <div className="group">
-          {added.map((lead) => {
+          {rows.map((lead) => {
             const sub =
               lead.status === "sold"
-                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "quiet" }
+                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "sold" }
                 : lead.status === "lost"
-                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
+                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "lost" }
                   : { ...dueMeta(lead.followUpOn, today), amount: null };
+            const quiet = quietDays(lead.lastContactAt || lead.createdAt, today);
             return (
               <div className="row" key={lead.id}>
                 <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
@@ -1494,8 +1521,9 @@ export function AddedScreen() {
                     <LeadName name={lead.name} createdAt={lead.createdAt} />
                     <span className={`row-sub ${sub.className}`}>
                       {sub.text}
-                      {sub.amount ? <> · {rupees(sub.amount)}</> : null}
+                      {sub.amount != null ? <> · {rupees(sub.amount)}</> : null}
                     </span>
+                    {(quiet ?? 0) >= 14 ? <span className="meta">Quiet {quiet}d</span> : null}
                   </span>
                 </button>
               </div>
@@ -1504,7 +1532,7 @@ export function AddedScreen() {
         </div>
       ) : (
         <div className="empty">
-          <h2>No leads added yet</h2>
+          <h2>{needle ? "No matches" : "No leads added yet"}</h2>
         </div>
       )}
     </>

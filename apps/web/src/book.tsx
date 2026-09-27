@@ -1250,6 +1250,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         if (profile) await db.profiles.put({ ...profile, removedAt: new Date().toISOString() });
         setSheet(null);
         setPendingMemberId(null);
+        setStack((current) => (current[current.length - 1] === "member" && current.length > 1 ? current.slice(0, -1) : current));
         showToast("Removed from the team");
         scheduleSync();
       } catch (reason) {

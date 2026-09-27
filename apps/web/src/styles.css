@@ -526,6 +526,8 @@ h1 {
   line-height: 1.7;
 }
 .row-sub { font-size: 14px; font-weight: 600; margin-top: 2px; }
+.row-sub.sold { color: var(--green-ink); }
+.row-sub.lost { color: var(--overdue); }
 .row-owner { color: var(--muted); font-size: 13px; font-weight: 600; margin-top: 2px; }
 
 .overdue { color: var(--overdue); }
@@ -1419,13 +1421,15 @@ button.settings-hero.member-open { text-align: center; }
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background:
-    radial-gradient(90% 140% at 0% 0%, #e7f3ec 0%, rgba(255, 253, 248, 0) 58%),
-    var(--card);
+  background: var(--card);
   box-shadow: 0 8px 20px rgba(40, 32, 20, 0.04);
   color: inherit;
   font: inherit;
   text-align: left;
+}
+.leads-by:active {
+  transform: none;
+  background: #f3f7f4;
 }
 .leads-by-copy {
   flex: 1;
@@ -1449,12 +1453,20 @@ button.settings-hero.member-open { text-align: center; }
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin: 6px 4px 10px;
+  margin: 6px 2px 10px;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.03em;
 }
+.added-who b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
 .added-who span {
+  flex: 0 0 auto;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
