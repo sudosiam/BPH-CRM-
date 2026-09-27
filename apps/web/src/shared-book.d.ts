@@ -96,6 +96,7 @@ declare module "@shared/book.mjs" {
   ): { status: "lead" | "lost"; followUpOn: string | null; closedOn: string | null; label: string } | null;
   export function appendHistory(history: string, today: string, line: string): string;
   export function quietDays(lastContactAt: string | null, today: string): number | null;
+  export function addedRecently(createdAt: string, now?: number): boolean;
   export function soldThisMonth(
     leads: Array<{ status: string; deletedAt?: string | null; closedOn?: string | null; soldAmount?: number | null }>,
     today: string,

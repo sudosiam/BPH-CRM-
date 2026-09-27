@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
+import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
@@ -514,6 +514,15 @@ function dayTally(leads: Lead[], today: string) {
   return { calls, messages };
 }
 
+function LeadName({ name, createdAt }: { name: string; createdAt: string }) {
+  return (
+    <span className="row-name">
+      <span className="name-text">{name}</span>
+      {addedRecently(createdAt) ? <span className="new-badge">New</span> : null}
+    </span>
+  );
+}
+
 function compareFollow(a: Lead, b: Lead) {
   if (a.followUpOn !== b.followUpOn) return (a.followUpOn ?? "") < (b.followUpOn ?? "") ? -1 : 1;
   return a.name.localeCompare(b.name);
@@ -536,7 +545,7 @@ function LeadSection({ title, className, rows, today }: { title: string; classNa
                   {initials(lead.name)}
                 </span>
                 <span className="row-copy">
-                  <span className="row-name">{lead.name}</span>
+                  <LeadName name={lead.name} createdAt={lead.createdAt} />
                   <span className={`row-sub ${due.className}`}>{due.text}</span>
                   <span className="row-owner">{ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me)}</span>
                 </span>
@@ -626,7 +635,7 @@ export function LeadsScreen() {
                     {initials(lead.name)}
                   </span>
                   <span className="row-copy">
-                    <span className="row-name">{lead.name}</span>
+                    <LeadName name={lead.name} createdAt={lead.createdAt} />
                     <span className={`row-sub ${sub.className}`}>
                       {sub.text}
                       {sub.amount ? <> · {rupees(sub.amount)}</> : null}
@@ -737,7 +746,7 @@ export function CustomersScreen() {
                     {initials(lead.name)}
                   </span>
                   <span className="row-copy">
-                    <span className="row-name">{lead.name}</span>
+                    <LeadName name={lead.name} createdAt={lead.createdAt} />
                     <span className={`row-sub ${toneClass}`}>{sub}</span>
                     {normalizeTags(lead.tags).length ? (
                       <span className="tag-row">
@@ -828,7 +837,10 @@ export function DetailScreen() {
             {initials(lead.name)}
           </span>
           <div>
-            <h1>{lead.name}</h1>
+            <h1>
+              <span className="name-text">{lead.name}</span>
+              {addedRecently(lead.createdAt) ? <span className="new-badge">New</span> : null}
+            </h1>
             <p className="meta">
               Owner · {adder}
               {lead.source ? ` · ${lead.source}` : ""}
