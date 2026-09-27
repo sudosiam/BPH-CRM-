@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadEditPatch, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
+import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, isOpenStatus, leadEditPatch, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
@@ -1082,11 +1082,11 @@ export function BookProvider({ children }: { children: ReactNode }) {
       const today = todayISO(me?.timezone || zone());
       const previous = { ...current };
       await changeLead(
-        status === "lead"
-          ? { status, closedOn: null, followUpOn: current.followUpOn || addDays(today, 1) }
+        isOpenStatus(status)
+          ? { status, closedOn: null, followUpOn: current.followUpOn || addDays(today, 1), lostReason: null }
           : { status, followUpOn: null, closedOn: today, lostReason: status === "lost" ? current.lostReason : null },
       );
-      const label = status === "sold" ? "Marked sold" : status === "lost" ? "Marked lost" : "Back to Lead";
+      const label = status === "sold" ? "Marked sold" : status === "lost" ? "Marked lost" : status === "qualified" ? "Marked qualified" : "Back to Lead";
       if (detailId) void logActivity(detailId, label);
       offerUndo(label, () => restoreLead(previous));
     },
@@ -1358,7 +1358,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       const saved = await patchLeadNow(
         id,
         (current) => {
-          const result = followUpResult(kind, today, current.followUpOn);
+          const result = followUpResult(kind, today, current.followUpOn, current.status);
           if (!result) return null;
           label = result.label;
           return {

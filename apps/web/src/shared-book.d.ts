@@ -6,6 +6,7 @@ declare module "@shared/book.mjs" {
   export function dayDiff(iso: string, today: string): number;
   export function localMinutes(timeZone: string, now?: Date): number;
   export function digestLine(dueToday: number, overdue: number): string;
+  export function isOpenStatus(status: string | null | undefined): boolean;
   export function digestCounts(
     leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null; ownerId?: string; createdBy?: string }>,
     today: string,
@@ -93,7 +94,8 @@ declare module "@shared/book.mjs" {
     kind: string,
     today: string,
     currentFollowUp: string | null,
-  ): { status: "lead" | "lost"; followUpOn: string | null; closedOn: string | null; label: string } | null;
+    currentStatus?: string | null,
+  ): { status: "lead" | "qualified" | "lost"; followUpOn: string | null; closedOn: string | null; label: string } | null;
   export function appendHistory(history: string, today: string, line: string): string;
   export function quietDays(lastContactAt: string | null, today: string): number | null;
   export function addedRecently(createdAt: string, now?: number): boolean;

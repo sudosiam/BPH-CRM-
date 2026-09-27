@@ -1,4 +1,4 @@
-export type LeadStatus = "lead" | "sold" | "lost";
+export type LeadStatus = "lead" | "qualified" | "sold" | "lost";
 
 export type Lead = {
   id: string;

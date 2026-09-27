@@ -10,6 +10,7 @@ import {
   normalizeCode,
   todayISO,
   digestCounts,
+  isOpenStatus,
   digestLine,
   shouldSendDigest,
   pullSince,
@@ -380,9 +381,9 @@ export function createBook(dataFile) {
     if (name.length < 1 || name.length > 120) return "Add a name.";
     if (phone.length > 40) return "Phone is too long.";
     if (notes.length > 2000) return "Notes are too long.";
-    if (!["lead", "sold", "lost"].includes(status)) return "Unknown status.";
-    if (status !== "lead" && input.followUpOn) return "Sold and lost leads cannot have a follow-up.";
-    if (status === "lead" && input.closedOn) return "An open lead cannot have a closed date.";
+    if (!["lead", "qualified", "sold", "lost"].includes(status)) return "Unknown status.";
+    if (!isOpenStatus(status) && input.followUpOn) return "Sold and lost leads cannot have a follow-up.";
+    if (isOpenStatus(status) && input.closedOn) return "An open lead cannot have a closed date.";
     return null;
   }
 
