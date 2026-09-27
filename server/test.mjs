@@ -171,6 +171,84 @@ test("accounts, invite, sync, and conflict", async () => {
   }
 });
 
+test("recycle bin keeps a fresh delete and drops an emptied one", async () => {
+  const { server, base } = await boot();
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "bin@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    const created = await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    const leadId = crypto.randomUUID();
+    const pushed = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: {
+          id: leadId,
+          name: "Old Fan",
+          phone: "01700000001",
+          notes: "",
+          status: "lead",
+          followUpOn: "2026-09-25",
+          closedOn: null,
+          ownerId: owner.data.user.id,
+        },
+      },
+    });
+    assert.equal(pushed.status, 200);
+
+    const removed = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: pushed.data.lead.version,
+        lead: { ...pushed.data.lead, deletedAt: "2020-01-01T00:00:00.000Z" },
+      },
+    });
+    assert.equal(removed.status, 200);
+    const stamped = Date.parse(removed.data.lead.deletedAt);
+    assert.ok(Date.now() - stamped < 60_000);
+
+    const held = await json(base, "/api/sync/pull", { token: owner.data.token });
+    assert.equal(held.data.leads.some((lead) => lead.id === leadId), true);
+    assert.equal((held.data.expiredIds ?? []).includes(leadId), false);
+
+    const edited = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: removed.data.lead.version,
+        lead: { ...removed.data.lead, name: "Renamed", deletedAt: removed.data.lead.deletedAt },
+      },
+    });
+    assert.equal(edited.status, 409);
+
+    const expiredAt = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
+    const emptied = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: removed.data.lead.version,
+        lead: { ...removed.data.lead, deletedAt: expiredAt },
+      },
+    });
+    assert.equal(emptied.status, 200);
+    assert.equal(emptied.data.lead.deletedAt, expiredAt);
+
+    const gone = await json(base, "/api/sync/pull", { token: owner.data.token });
+    assert.equal(gone.data.leads.some((lead) => lead.id === leadId), false);
+    assert.equal(gone.data.expiredIds.includes(leadId), true);
+  } finally {
+    server.close();
+  }
+});
+
 test("digest stays quiet until the chosen time and when nothing is due", () => {
   const morning = new Date("2026-09-25T08:00:00Z");
   assert.equal(
