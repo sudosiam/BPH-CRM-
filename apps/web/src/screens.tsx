@@ -1312,26 +1312,17 @@ export function AccountScreen() {
   if (!book.me || !book.org) return null;
   const me = book.me;
   const org = book.org;
-  const today = todayISO(me.timezone);
   const code = org.inviteCode;
-  const sold = soldThisMonth(book.leads, today);
+  const role = me.role === "owner" ? "Owner" : "Member";
   return (
     <div className="settings">
       <button className="card-block settings-hero member-open" type="button" onClick={() => book.openMember(me.id)}>
         <span className="avatar" style={{ background: tone(me.displayName) }}>
           {initials(me.displayName)}
         </span>
-        <div className="settings-id">
-          <h2>{me.displayName}</h2>
-          <p className="meta">
-            {me.role === "owner" ? "Owner" : "Member"} · {org.name}
-          </p>
-          {book.email ? <p className="meta">{book.email}</p> : null}
-          <p className="meta">
-            {sold.count} sold this month · {rupees(sold.amount)}
-          </p>
-        </div>
-        <span className="chevron" aria-hidden="true" />
+        <h2>{me.displayName}</h2>
+        {book.email ? <p className="settings-email">{book.email}</p> : null}
+        <span className="settings-role">{role}</span>
       </button>
       <section className="part">
         <p className="part-label">Team</p>

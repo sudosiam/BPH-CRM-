@@ -1152,23 +1152,52 @@ button:active, a.call:active, .chip:active, .row-open:active, .tab:active, .menu
 .settings > .part:first-child { margin-top: 22px; }
 .settings-hero {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  margin-top: 6px;
+  text-align: center;
+  gap: 0;
+  margin-top: 8px;
+  padding: 28px 22px 24px;
+  background:
+    radial-gradient(120% 70% at 50% -20%, #e7f3ec 0%, rgba(255, 253, 248, 0) 58%),
+    var(--card);
 }
 .settings-hero h2 {
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: -0.03em;
+  margin: 14px 0 0;
+  max-width: 100%;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
 }
-.settings-id { flex: 1; min-width: 0; }
-.settings-id .meta {
-  margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.settings-email {
+  margin: 6px 0 0;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
-.settings-hero .avatar { width: 56px; height: 56px; font-size: 18px; }
+.settings-role {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green-ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+.settings-hero .avatar {
+  width: 76px;
+  height: 76px;
+  font-size: 24px;
+  box-shadow: inset 0 0 0 1px rgba(28, 25, 22, 0.05), 0 10px 22px rgba(40, 32, 20, 0.07);
+}
+button.settings-hero { text-align: center; }
 .chevron {
   width: 8px;
   height: 8px;
@@ -1321,6 +1350,7 @@ button.member-open {
   text-align: left;
   cursor: pointer;
 }
+button.settings-hero.member-open { text-align: center; }
 .profile-hero {
   display: flex;
   flex-direction: column;
