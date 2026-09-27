@@ -4,7 +4,7 @@ import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digest
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
-import { IconChat, IconDownload, IconLeads, IconRupee } from "./icons";
+import { IconChat, IconDownload, IconRupee } from "./icons";
 import { APP_VERSION } from "./version";
 
 const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
@@ -1471,8 +1471,9 @@ export function AddedScreen() {
   const added = addedBy(person.id, book.leads);
   return (
     <>
-      <p className="meta customer-count">
-        {added.length} {added.length === 1 ? "lead" : "leads"}
+      <p className="added-who">
+        {person.displayName}
+        <span>{added.length === 1 ? "1 lead" : `${added.length} leads`}</span>
       </p>
       {added.length ? (
         <div className="group">
@@ -1578,18 +1579,13 @@ export function MemberScreen() {
             <span>Lost</span>
           </div>
         </div>
-      </section>
-      <section className="part">
-        <div className="menu-card">
-          <button className="menu-row" type="button" onClick={book.openAdded}>
-            <span className="menu-mark">
-              <IconLeads />
-            </span>
-            <span>Leads by this user</span>
-            <span className="menu-count">{owned.length}</span>
-            <span className="chevron" aria-hidden="true" />
-          </button>
-        </div>
+        <button className="leads-by" type="button" onClick={book.openAdded}>
+          <span className="leads-by-copy">
+            <b>Leads by this user</b>
+            <em>{owned.length === 1 ? "1 lead" : `${owned.length} leads`}</em>
+          </span>
+          <span className="chevron" aria-hidden="true" />
+        </button>
       </section>
       <section className="part">
         <p className="part-label">Reminders</p>
