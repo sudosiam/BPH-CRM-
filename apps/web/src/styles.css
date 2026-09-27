@@ -1227,6 +1227,13 @@ button.settings-hero { text-align: center; }
   transform: rotate(-45deg);
   flex: 0 0 auto;
 }
+.part .menu-card { margin-top: 0; }
+.menu-count {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
 .menu-card {
   margin-top: 18px;
   background: var(--card);

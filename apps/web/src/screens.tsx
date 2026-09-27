@@ -4,7 +4,7 @@ import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digest
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
-import { IconChat, IconDownload, IconRupee } from "./icons";
+import { IconChat, IconDownload, IconLeads, IconRupee } from "./icons";
 import { APP_VERSION } from "./version";
 
 const TONES = ["#E7EFEA", "#F3E8DC", "#E8E6F2", "#F6E4E2", "#E4EEF2"];
@@ -1446,6 +1446,70 @@ export function MessageScreen() {
   );
 }
 
+function addedBy(personId: string, leads: Lead[]) {
+  return leads
+    .filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === personId)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.name.localeCompare(b.name)));
+}
+
+export function AddedScreen() {
+  const book = useBook();
+  if (!book.me) return null;
+  const person = book.profiles.find((profile) => profile.id === book.memberId && !profile.removedAt);
+  if (!person) {
+    return (
+      <div className="settings">
+        <section className="part">
+          <div className="card-block">
+            <h2>This person is no longer on the team.</h2>
+          </div>
+        </section>
+      </div>
+    );
+  }
+  const today = todayISO(person.timezone || book.me.timezone);
+  const added = addedBy(person.id, book.leads);
+  return (
+    <>
+      <p className="meta customer-count">
+        {added.length} {added.length === 1 ? "lead" : "leads"}
+      </p>
+      {added.length ? (
+        <div className="group">
+          {added.map((lead) => {
+            const sub =
+              lead.status === "sold"
+                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "quiet" }
+                : lead.status === "lost"
+                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
+                  : { ...dueMeta(lead.followUpOn, today), amount: null };
+            return (
+              <div className="row" key={lead.id}>
+                <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
+                  <span className="avatar" style={{ background: tone(lead.name) }}>
+                    {initials(lead.name)}
+                  </span>
+                  <span className="row-copy">
+                    <LeadName name={lead.name} createdAt={lead.createdAt} />
+                    <span className={`row-sub ${sub.className}`}>
+                      {sub.text}
+                      {sub.amount ? <> · {rupees(sub.amount)}</> : null}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty">
+          <h2>No leads added yet</h2>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function MemberScreen() {
   const book = useBook();
   if (!book.me) return null;
@@ -1463,8 +1527,7 @@ export function MemberScreen() {
     );
   }
   const mine = person.id === me.id;
-  const owned = book.leads.filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === person.id);
-  const added = [...owned].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.name.localeCompare(b.name)));
+  const owned = addedBy(person.id, book.leads);
   const today = todayISO(person.timezone || me.timezone);
   const open = owned.filter((lead) => lead.status === "lead").length;
   const counts = digestCounts(owned, today);
@@ -1517,39 +1580,16 @@ export function MemberScreen() {
         </div>
       </section>
       <section className="part">
-        <p className="part-label">Added · {added.length}</p>
-        {added.length ? (
-          <div className="group">
-            {added.map((lead) => {
-              const sub =
-                lead.status === "sold"
-                  ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "quiet" }
-                  : lead.status === "lost"
-                    ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
-                    : { ...dueMeta(lead.followUpOn, today), amount: null };
-              return (
-                <div className="row" key={lead.id}>
-                  <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
-                    <span className="avatar" style={{ background: tone(lead.name) }}>
-                      {initials(lead.name)}
-                    </span>
-                    <span className="row-copy">
-                      <LeadName name={lead.name} createdAt={lead.createdAt} />
-                      <span className={`row-sub ${sub.className}`}>
-                        {sub.text}
-                        {sub.amount ? <> · {rupees(sub.amount)}</> : null}
-                      </span>
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="card-block">
-            <p className="meta">No contacts added yet.</p>
-          </div>
-        )}
+        <div className="menu-card">
+          <button className="menu-row" type="button" onClick={book.openAdded}>
+            <span className="menu-mark">
+              <IconLeads />
+            </span>
+            <span>Leads by this user</span>
+            <span className="menu-count">{owned.length}</span>
+            <span className="chevron" aria-hidden="true" />
+          </button>
+        </div>
       </section>
       <section className="part">
         <p className="part-label">Reminders</p>

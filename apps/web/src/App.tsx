@@ -14,6 +14,7 @@ import {
   EditScreen,
   JoinScreen,
   LeadsScreen,
+  AddedScreen,
   MemberScreen,
   MessageScreen,
   OpeningScreen,
@@ -181,13 +182,21 @@ function Shell() {
               <span className="header-side" />
             )}
           </>
-        ) : book.screen === "account" || book.screen === "member" || book.screen === "message" || book.screen === "bin" ? (
+        ) : book.screen === "account" || book.screen === "member" || book.screen === "added" || book.screen === "message" || book.screen === "bin" ? (
           <>
             <button className="icon-btn header-side" type="button" aria-label="Back" onClick={book.back}>
               <IconBack />
             </button>
             <p className="header-title">
-              {book.screen === "member" ? "Profile" : book.screen === "message" ? "WhatsApp Message" : book.screen === "bin" ? "Recycle bin" : "Settings"}
+              {book.screen === "member"
+                ? "Profile"
+                : book.screen === "added"
+                  ? "Leads by this user"
+                  : book.screen === "message"
+                    ? "WhatsApp Message"
+                    : book.screen === "bin"
+                      ? "Recycle bin"
+                      : "Settings"}
             </p>
             {book.screen === "account" ? (
               <button className="icon-btn header-side" type="button" aria-label="Recycle bin" onClick={book.openBin}>
@@ -237,6 +246,7 @@ function Shell() {
         {book.phase === "app" && book.screen === "account" ? <AccountScreen /> : null}
         {book.phase === "app" && book.screen === "bin" ? <BinScreen /> : null}
         {book.phase === "app" && book.screen === "member" ? <MemberScreen /> : null}
+        {book.phase === "app" && book.screen === "added" ? <AddedScreen /> : null}
         {book.phase === "app" && book.screen === "message" ? <MessageScreen /> : null}
         {book.phase === "app" && book.screen === "detail" ? <DetailScreen /> : null}
         {book.phase === "app" && book.screen === "edit" ? <EditScreen key={book.detailId ?? "new"} /> : null}
