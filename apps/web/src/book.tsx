@@ -737,12 +737,26 @@ export function BookProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org?.id, org?.waTemplate, me?.role]);
 
+  const editorDirtyRef = useRef(false);
+  editorDirtyRef.current = editorDirty;
+
   useEffect(() => {
     void remote.vapidPublicKey().then((key) => setPushReady(Boolean(key))).catch(() => setPushReady(false));
-    const onUpdate = () => setUpdateReady(true);
+    const onUpdate = () => {
+      if (editorDirtyRef.current) {
+        setUpdateReady(true);
+        return;
+      }
+      window.dispatchEvent(new Event("bph-apply-update"));
+    };
     window.addEventListener("bph-sw-update", onUpdate);
     return () => window.removeEventListener("bph-sw-update", onUpdate);
   }, []);
+
+  useEffect(() => {
+    if (!updateReady || editorDirty) return;
+    window.dispatchEvent(new Event("bph-apply-update"));
+  }, [updateReady, editorDirty]);
 
   async function changeLead(patch: Partial<Lead>) {
     if (!detailId || !me) return;

@@ -409,7 +409,7 @@ function BulkList({ ids, noun, children }: { ids: string[]; noun: string; childr
 
 export function TodayScreen() {
   const book = useBook();
-  const [everyone, setEveryone] = useState(false);
+  const [everyone, setEveryone] = useState(true);
   const today = todayISO(book.me?.timezone);
   const mine = (lead: Lead) => (lead.createdBy || lead.ownerId) === book.me?.id;
   const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn) && (everyone || mine(lead)));
