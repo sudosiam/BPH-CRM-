@@ -58,9 +58,13 @@ export function digestLine(dueToday, overdue) {
   return parts.join(" · ");
 }
 
+export function isOpenStatus(status) {
+  return status === "lead" || status === "qualified";
+}
+
 export function digestCounts(leads, today, ownerId) {
   const rows = leads.filter((lead) => {
-    if (lead.deletedAt || lead.status !== "lead" || !lead.followUpOn) return false;
+    if (lead.deletedAt || !isOpenStatus(lead.status) || !lead.followUpOn) return false;
     if (!ownerId) return true;
     return (lead.createdBy || lead.ownerId) === ownerId;
   });
@@ -296,14 +300,15 @@ export function leadEditPatch(current, next, name) {
     tags: normalizeTags(next?.tags),
     ownerId: current?.ownerId,
   };
-  if (current?.status === "lead") patch.followUpOn = next?.followUpOn || null;
+  if (isOpenStatus(current?.status)) patch.followUpOn = next?.followUpOn || null;
   return patch;
 }
 
-export function followUpResult(kind, today, currentFollowUp) {
-  if (kind === "no-answer") return { status: "lead", followUpOn: addDays(today, 1), closedOn: null, label: "No answer" };
-  if (kind === "later") return { status: "lead", followUpOn: addDays(today, 3), closedOn: null, label: "Call later" };
-  if (kind === "quoted") return { status: "lead", followUpOn: currentFollowUp || null, closedOn: null, label: "Quoted" };
+export function followUpResult(kind, today, currentFollowUp, currentStatus) {
+  const open = currentStatus === "qualified" ? "qualified" : "lead";
+  if (kind === "no-answer") return { status: open, followUpOn: addDays(today, 1), closedOn: null, label: "No answer" };
+  if (kind === "later") return { status: open, followUpOn: addDays(today, 3), closedOn: null, label: "Call later" };
+  if (kind === "quoted") return { status: open, followUpOn: currentFollowUp || null, closedOn: null, label: "Quoted" };
   if (kind === "not-interested") return { status: "lost", followUpOn: null, closedOn: today, label: "Not interested" };
   return null;
 }

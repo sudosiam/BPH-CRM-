@@ -171,6 +171,63 @@ test("accounts, invite, sync, and conflict", async () => {
   }
 });
 
+test("a qualified lead keeps its follow-up and is not closed", async () => {
+  const { server, base } = await boot();
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "qualified@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    const created = await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    const leadId = crypto.randomUUID();
+    const qualified = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: {
+          id: leadId,
+          name: "Ready Buyer",
+          phone: "01700000000",
+          notes: "",
+          status: "qualified",
+          followUpOn: "2026-10-01",
+          closedOn: null,
+          ownerId: owner.data.user.id,
+        },
+      },
+    });
+    assert.equal(qualified.status, 200);
+    assert.equal(qualified.data.lead.status, "qualified");
+    assert.equal(qualified.data.lead.followUpOn, "2026-10-01");
+    const closed = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: qualified.data.lead.version,
+        lead: { ...qualified.data.lead, closedOn: "2026-10-01" },
+      },
+    });
+    assert.equal(closed.status, 400);
+    const sold = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: qualified.data.lead.version,
+        lead: { ...qualified.data.lead, status: "sold", followUpOn: null, closedOn: "2026-10-01" },
+      },
+    });
+    assert.equal(sold.status, 200);
+    assert.equal(sold.data.lead.status, "sold");
+  } finally {
+    server.close();
+  }
+});
+
 test("recycle bin keeps a fresh delete and drops an emptied one", async () => {
   const { server, base } = await boot();
   try {

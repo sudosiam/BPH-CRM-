@@ -70,7 +70,7 @@ Deno.serve(async () => {
       .from("leads")
       .select("follow_up_on, status, deleted_at, owner_id")
       .eq("org_id", profile.org_id)
-      .eq("status", "lead")
+      .in("status", ["lead", "qualified"])
       .is("deleted_at", null);
 
     const open = (leads ?? []).filter((lead) => lead.follow_up_on);

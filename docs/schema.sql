@@ -3,7 +3,7 @@
 
 create extension if not exists pgcrypto;
 
-create type public.lead_status as enum ('lead', 'sold', 'lost');
+create type public.lead_status as enum ('lead', 'qualified', 'sold', 'lost');
 create type public.member_role as enum ('owner', 'member');
 
 create table public.orgs (
@@ -54,8 +54,8 @@ create table public.leads (
   last_contact_at timestamptz,
   contact_count integer not null default 0,
   history text not null default '',
-  constraint follow_up_only_for_leads check (status = 'lead' or follow_up_on is null),
-  constraint open_leads_are_not_closed check (status <> 'lead' or closed_on is null),
+  constraint follow_up_only_for_leads check (status in ('lead', 'qualified') or follow_up_on is null),
+  constraint open_leads_are_not_closed check (status not in ('lead', 'qualified') or closed_on is null),
   constraint leads_tags_known check (tags <@ array['Scooty', 'Lithium battery', 'Acid battery', 'Parts']::text[]),
   constraint leads_owner_fk foreign key (org_id, owner_id) references public.profiles (org_id, id),
   constraint leads_created_by_fk foreign key (org_id, created_by) references public.profiles (org_id, id),
@@ -64,7 +64,7 @@ create table public.leads (
 
 create index leads_org_updated_idx on public.leads (org_id, updated_at);
 create index leads_owner_follow_up_idx on public.leads (owner_id, follow_up_on)
-  where status = 'lead' and deleted_at is null;
+  where status in ('lead', 'qualified') and deleted_at is null;
 
 create table public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),

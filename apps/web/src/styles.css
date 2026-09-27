@@ -7,6 +7,8 @@
   --green: #1b4d3a;
   --green-soft: #e4f1ea;
   --green-ink: #145c42;
+  --qualified: #1d5c6b;
+  --qualified-soft: #e4f3f4;
   --due: #8a4e10;
   --due-soft: #f8efdf;
   --overdue: #8e2f28;
@@ -399,6 +401,11 @@ h1 {
   color: var(--ink);
   box-shadow: 0 4px 12px rgba(40, 32, 20, 0.06);
 }
+.segments button, .status-switch button {
+  font-size: 12px;
+  padding: 0 2px;
+  letter-spacing: -0.03em;
+}
 
 .section-label {
   margin: 22px 2px 8px;
@@ -527,6 +534,7 @@ h1 {
 }
 .row-sub { font-size: 14px; font-weight: 600; margin-top: 2px; }
 .row-sub.sold { color: var(--green-ink); }
+.row-sub.qualified { color: var(--qualified); }
 .row-sub.lost { color: var(--overdue); }
 .row-owner { color: var(--muted); font-size: 13px; font-weight: 600; margin-top: 2px; }
 
@@ -785,6 +793,7 @@ h1 {
 .due-pill.overdue { background: var(--overdue-soft); }
 .due-pill.today-due { background: var(--due-soft); }
 .due-pill.sold { background: var(--green-soft); color: var(--green-ink); }
+.due-pill.qualified { background: var(--qualified-soft); color: var(--qualified); }
 .due-pill.lost { background: var(--overdue-soft); color: var(--overdue); }
 .detail .subhead { margin: 16px 0 0; font-size: 13px; color: var(--muted); }
 .timeline {

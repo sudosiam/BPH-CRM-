@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
+import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, isOpenStatus, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
@@ -49,10 +49,23 @@ function rupees(amount: number) {
   );
 }
 
+const STATUSES = ["lead", "qualified", "sold", "lost"] as const;
+
 function labelStatus(status: Lead["status"]) {
+  if (status === "qualified") return "Qualified";
   if (status === "sold") return "Sold";
   if (status === "lost") return "Lost";
   return "Lead";
+}
+
+function leadLine(lead: Lead, today: string) {
+  if (lead.status === "sold") return { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "sold" };
+  if (lead.status === "lost") return { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "lost" };
+  const due = dueMeta(lead.followUpOn, today);
+  if (lead.status === "qualified") {
+    return { text: `Qualified · ${due.text}`, amount: null, className: due.className === "quiet" ? "qualified" : due.className };
+  }
+  return { ...due, amount: null as number | null };
 }
 
 function ownerName(profiles: Profile[], id: string, me: Profile | null) {
@@ -412,8 +425,8 @@ export function TodayScreen() {
   const [everyone, setEveryone] = useState(true);
   const today = todayISO(book.me?.timezone);
   const mine = (lead: Lead) => (lead.createdBy || lead.ownerId) === book.me?.id;
-  const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => lead.status === "lead" && Boolean(lead.followUpOn) && (everyone || mine(lead)));
-  const undated = book.leads.filter((lead) => lead.status === "lead" && !lead.followUpOn && (everyone || mine(lead)));
+  const open = book.leads.filter((lead): lead is Lead & { followUpOn: string } => isOpenStatus(lead.status) && Boolean(lead.followUpOn) && (everyone || mine(lead)));
+  const undated = book.leads.filter((lead) => isOpenStatus(lead.status) && !lead.followUpOn && (everyone || mine(lead)));
   const overdue = open.filter((lead) => dayDiff(lead.followUpOn, today) < 0).sort(compareFollow);
   const due = open.filter((lead) => dayDiff(lead.followUpOn, today) === 0).sort(compareFollow);
   const later = open
@@ -421,7 +434,7 @@ export function TodayScreen() {
     .sort(compareFollow);
   const beyond = open.filter((lead) => lead.followUpOn && dayDiff(lead.followUpOn, today) > 7).length;
   const teamDue = book.leads.some(
-    (lead) => lead.status === "lead" && lead.followUpOn && !mine(lead) && dayDiff(lead.followUpOn, today) <= 0,
+    (lead) => isOpenStatus(lead.status) && lead.followUpOn && !mine(lead) && dayDiff(lead.followUpOn, today) <= 0,
   );
   const showReminder = book.me && !book.me.notifyEnabled && !book.snoozed && overdue.length + due.length + later.length > 0;
   const scoped = book.leads.filter((lead) => everyone || mine(lead));
@@ -536,7 +549,7 @@ function LeadSection({ title, className, rows, today }: { title: string; classNa
       <h2 className={`section-label ${className}`}>{title}</h2>
       <div className="group">
         {rows.map((lead) => {
-          const due = dueMeta(lead.followUpOn, today);
+          const due = leadLine(lead, today);
           const call = telHref(lead.phone);
           return (
             <div className="row" key={lead.id}>
@@ -568,6 +581,7 @@ export function LeadsScreen() {
   const today = todayISO(book.me?.timezone);
   const counts = {
     lead: book.leads.filter((lead) => lead.status === "lead").length,
+    qualified: book.leads.filter((lead) => lead.status === "qualified").length,
     sold: book.leads.filter((lead) => lead.status === "sold").length,
     lost: book.leads.filter((lead) => lead.status === "lost").length,
   };
@@ -589,15 +603,17 @@ export function LeadsScreen() {
     });
   const emptyTitle = query
     ? "No matches"
-    : book.segment === "sold"
-      ? "No sold leads yet"
-      : book.segment === "lost"
-        ? "No lost leads yet"
-        : "No open leads yet";
+    : book.segment === "qualified"
+      ? "No qualified leads yet"
+      : book.segment === "sold"
+        ? "No sold leads yet"
+        : book.segment === "lost"
+          ? "No lost leads yet"
+          : "No open leads yet";
   return (
     <>
       <div className="segments">
-        {(["lead", "sold", "lost"] as const).map((status) => (
+        {STATUSES.map((status) => (
           <button key={status} type="button" className={book.segment === status ? "on" : ""} onClick={() => book.setSegment(status)}>
             {labelStatus(status)} · {counts[status]}
           </button>
@@ -622,12 +638,7 @@ export function LeadsScreen() {
       {rows.length ? (
         <div className="group">
           {rows.map((lead) => {
-            const sub =
-              lead.status === "sold"
-                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "quiet" }
-                : lead.status === "lost"
-                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
-                  : { ...dueMeta(lead.followUpOn, today), amount: null };
+            const sub = leadLine(lead, today);
             return (
               <div className="row" key={lead.id}>
                 <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
@@ -684,7 +695,7 @@ export function CustomersScreen() {
       <div className="filter-card">
         <div className="filter-line">
           <p className="filter-label">Status</p>
-          {(["all", "lead", "sold", "lost"] as const).map((item) => (
+          {(["all", ...STATUSES] as const).map((item) => (
             <button key={item} type="button" className={`chip ${status === item ? "on" : ""}`} onClick={() => setStatus(item)}>
               {item === "all" ? "All" : labelStatus(item)}
             </button>
@@ -725,13 +736,7 @@ export function CustomersScreen() {
           rows.length ? (
         <div className="group">
           {rows.map((lead) => {
-            const sub =
-              lead.status === "sold"
-                ? `Sold · ${prettyDate(lead.closedOn || today)}`
-                : lead.status === "lost"
-                  ? `Lost · ${prettyDate(lead.closedOn || today)}`
-                  : dueMeta(lead.followUpOn, today).text;
-            const toneClass = lead.status === "lead" ? dueMeta(lead.followUpOn, today).className : "quiet";
+            const sub = leadLine(lead, today);
             const picked = select.on && select.has(lead.id);
             return (
               <div className={`row ${picked ? "picked" : ""}`} key={lead.id}>
@@ -747,7 +752,10 @@ export function CustomersScreen() {
                   </span>
                   <span className="row-copy">
                     <LeadName name={lead.name} createdAt={lead.createdAt} />
-                    <span className={`row-sub ${toneClass}`}>{sub}</span>
+                    <span className={`row-sub ${sub.className}`}>
+                      {sub.text}
+                      {sub.amount != null ? <> · {rupees(sub.amount)}</> : null}
+                    </span>
                     {normalizeTags(lead.tags).length ? (
                       <span className="tag-row">
                         {normalizeTags(lead.tags).map((tag) => (
@@ -856,8 +864,10 @@ export function DetailScreen() {
             ) : null}
           </div>
         </div>
-        {lead.status === "lead" ? (
-          <p className={`due-pill ${due.className}`}>{due.text}</p>
+        {isOpenStatus(lead.status) ? (
+          <p className={`due-pill ${lead.status === "qualified" && due.className === "quiet" ? "qualified" : due.className}`}>
+            {lead.status === "qualified" ? `Qualified · ${due.text}` : due.text}
+          </p>
         ) : (
           <p className={`due-pill ${lead.status}`}>{labelStatus(lead.status)} · {prettyDate(lead.closedOn || today)}</p>
         )}
@@ -881,14 +891,14 @@ export function DetailScreen() {
           </>
         ) : null}
         <div className="status-switch" role="group" aria-label="Status">
-          {(["lead", "sold", "lost"] as const).map((status) => (
+          {STATUSES.map((status) => (
             <button key={status} type="button" className={lead.status === status ? "on" : ""} onClick={() => void book.setStatus(status)}>
               {labelStatus(status)}
             </button>
           ))}
         </div>
       </section>
-      {lead.status === "lead" ? (
+      {isOpenStatus(lead.status) ? (
         <div className="card-block">
           <h2>Follow-up</h2>
           <FollowChips selected={lead.followUpOn} today={today} onPick={(iso) => void book.setFollowUp(iso)} />
@@ -1068,7 +1078,7 @@ export function EditScreen() {
           </button>
         ))}
       </div>
-      {(existing?.status ?? "lead") === "lead" ? (
+      {isOpenStatus(existing?.status ?? "lead") ? (
         <>
           <span className="field">
             <span>Follow-up</span>
@@ -1504,12 +1514,7 @@ export function AddedScreen() {
       {rows.length ? (
         <div className="group">
           {rows.map((lead) => {
-            const sub =
-              lead.status === "sold"
-                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "sold" }
-                : lead.status === "lost"
-                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "lost" }
-                  : { ...dueMeta(lead.followUpOn, today), amount: null };
+            const sub = leadLine(lead, today);
             const quiet = quietDays(lead.lastContactAt || lead.createdAt, today);
             return (
               <div className="row" key={lead.id}>
@@ -1558,7 +1563,7 @@ export function MemberScreen() {
   const mine = person.id === me.id;
   const owned = addedBy(person.id, book.leads);
   const today = todayISO(person.timezone || me.timezone);
-  const open = owned.filter((lead) => lead.status === "lead").length;
+  const open = owned.filter((lead) => isOpenStatus(lead.status)).length;
   const counts = digestCounts(owned, today);
   const sold = soldThisMonth(owned, today);
   const lost = owned.filter((lead) => lead.status === "lost").length;
