@@ -1,0 +1,24 @@
+name: Keep the database awake
+
+on:
+  schedule:
+    # A free Supabase project pauses after about a week with too little use.
+    # Three checks a day count as real database use.
+    - cron: "0 2 * * *"
+    - cron: "0 10 * * *"
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Ask the database for the time
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node scripts/keepalive.mjs
