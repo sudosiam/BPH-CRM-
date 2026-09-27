@@ -10,7 +10,7 @@ import { commitSoldDurable, enqueueSync, flushOutbox, flushProfile, patchLeadNow
 import type { Account, Lead, Meta, Org, Profile } from "./types";
 
 type Phase = "loading" | "auth" | "signup" | "reset" | "password" | "start" | "join" | "copy" | "copy-error" | "app";
-type Screen = "today" | "leads" | "customers" | "account" | "member" | "message" | "bin" | "detail" | "edit";
+type Screen = "today" | "leads" | "customers" | "account" | "member" | "added" | "message" | "bin" | "detail" | "edit";
 
 function rootOf(stack: Screen[]): "today" | "leads" | "customers" {
   return stack.find((screen) => screen === "today" || screen === "leads" || screen === "customers") ?? "today";
@@ -75,6 +75,7 @@ type BookValue = {
   openMessage: () => void;
   openLead: (id: string) => void;
   openMember: (id: string) => void;
+  openAdded: () => void;
   back: () => void;
   startDraft: () => void;
   editCurrent: () => void;
@@ -836,6 +837,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setStack((current) => [...current, "member"]);
       setSheet(null);
     },
+    openAdded() {
+      setStack((current) => [...current, "added"]);
+      setSheet(null);
+    },
     back() {
       if (screen === "edit" && editorDirty) {
         setSheet("discard");
@@ -1245,6 +1250,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         if (profile) await db.profiles.put({ ...profile, removedAt: new Date().toISOString() });
         setSheet(null);
         setPendingMemberId(null);
+        setStack((current) => (current[current.length - 1] === "member" && current.length > 1 ? current.slice(0, -1) : current));
         showToast("Removed from the team");
         scheduleSync();
       } catch (reason) {

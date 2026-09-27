@@ -1446,6 +1446,99 @@ export function MessageScreen() {
   );
 }
 
+function addedBy(personId: string, leads: Lead[]) {
+  return leads
+    .filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === personId)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.name.localeCompare(b.name)));
+}
+
+const addedSearch = new Map<string, string>();
+
+export function AddedScreen() {
+  const book = useBook();
+  const personId = book.memberId || "";
+  const [query, setQuery] = useState(() => addedSearch.get(personId) || "");
+  useEffect(() => {
+    addedSearch.set(personId, query);
+  }, [personId, query]);
+  if (!book.me) return null;
+  const person = book.profiles.find((profile) => profile.id === book.memberId && !profile.removedAt);
+  if (!person) {
+    return (
+      <div className="settings">
+        <section className="part">
+          <div className="card-block">
+            <h2>This person is no longer on the team.</h2>
+          </div>
+        </section>
+      </div>
+    );
+  }
+  const today = todayISO(person.timezone || book.me.timezone);
+  const added = addedBy(person.id, book.leads);
+  const needle = query.trim().toLowerCase();
+  const rows = needle
+    ? added.filter((lead) => `${lead.name} ${lead.phone} ${lead.notes}`.toLowerCase().includes(needle))
+    : added;
+  const countLabel = needle
+    ? `${rows.length} of ${added.length}`
+    : added.length === 1
+      ? "1 lead"
+      : `${added.length} leads`;
+  return (
+    <>
+      <p className="added-who">
+        <b>{person.displayName}</b>
+        <span>{countLabel}</span>
+      </p>
+      {added.length ? (
+        <input
+          className="search"
+          type="search"
+          placeholder="Search name, phone, or notes"
+          value={query}
+          autoComplete="off"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      ) : null}
+      {rows.length ? (
+        <div className="group">
+          {rows.map((lead) => {
+            const sub =
+              lead.status === "sold"
+                ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "sold" }
+                : lead.status === "lost"
+                  ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "lost" }
+                  : { ...dueMeta(lead.followUpOn, today), amount: null };
+            const quiet = quietDays(lead.lastContactAt || lead.createdAt, today);
+            return (
+              <div className="row" key={lead.id}>
+                <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
+                  <span className="avatar" style={{ background: tone(lead.name) }}>
+                    {initials(lead.name)}
+                  </span>
+                  <span className="row-copy">
+                    <LeadName name={lead.name} createdAt={lead.createdAt} />
+                    <span className={`row-sub ${sub.className}`}>
+                      {sub.text}
+                      {sub.amount != null ? <> · {rupees(sub.amount)}</> : null}
+                    </span>
+                    {(quiet ?? 0) >= 14 ? <span className="meta">Quiet {quiet}d</span> : null}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty">
+          <h2>{needle ? "No matches" : "No leads added yet"}</h2>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function MemberScreen() {
   const book = useBook();
   if (!book.me) return null;
@@ -1463,7 +1556,7 @@ export function MemberScreen() {
     );
   }
   const mine = person.id === me.id;
-  const owned = book.leads.filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === person.id);
+  const owned = addedBy(person.id, book.leads);
   const today = todayISO(person.timezone || me.timezone);
   const open = owned.filter((lead) => lead.status === "lead").length;
   const counts = digestCounts(owned, today);
@@ -1514,6 +1607,13 @@ export function MemberScreen() {
             <span>Lost</span>
           </div>
         </div>
+        <button className="leads-by" type="button" onClick={book.openAdded}>
+          <span className="leads-by-copy">
+            <b>Leads by this user</b>
+            <em>{owned.length === 1 ? "1 lead" : `${owned.length} leads`}</em>
+          </span>
+          <span className="chevron" aria-hidden="true" />
+        </button>
       </section>
       <section className="part">
         <p className="part-label">Reminders</p>
