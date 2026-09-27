@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, followUpResult, mergeLead, mergeLeadFields, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
+import { customerMatches, followUpResult, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
+  assert.equal(leadEditPatch({ status: "lead", ownerId: "a" }, { phone: " 017 ", notes: " hi ", source: "Phone", tags: ["Scooty", "Nope"], followUpOn: "2026-10-01" }, " Rina ").followUpOn, "2026-10-01");
+  assert.equal(leadEditPatch({ status: "lead", ownerId: "a" }, { phone: "", notes: "", source: null, tags: [], followUpOn: "" }, "Rina").followUpOn, null);
+  assert.equal("followUpOn" in leadEditPatch({ status: "sold", ownerId: "a" }, { phone: "", notes: "", tags: [], followUpOn: "2026-10-01" }, "Rina"), false);
   assert.equal(followUpResult("no-answer", "2026-09-26", "2026-09-20").followUpOn, "2026-09-27");
   assert.equal(followUpResult("later", "2026-09-26", null).followUpOn, "2026-09-29");
   assert.equal(followUpResult("quoted", "2026-09-26", "2026-10-01").followUpOn, "2026-10-01");

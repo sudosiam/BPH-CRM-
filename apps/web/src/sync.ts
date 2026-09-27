@@ -39,6 +39,9 @@ export function tombstoneFresh(deletedAt: string | null, now = Date.now()) {
 export async function applyPull(payload: Awaited<ReturnType<typeof remote.pull>>, replaceAll: boolean) {
   await db.transaction("rw", db.leads, db.profiles, db.meta, db.outbox, async () => {
     const pending = new Set((await db.outbox.toArray()).map((item) => item.id));
+    for (const lead of await db.leads.toArray()) {
+      if (!pending.has(lead.id) && lead.deletedAt && !tombstoneFresh(lead.deletedAt)) await db.leads.delete(lead.id);
+    }
     for (const id of payload.expiredIds ?? []) {
       if (!pending.has(id)) await db.leads.delete(id);
     }
