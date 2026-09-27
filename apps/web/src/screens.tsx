@@ -424,6 +424,10 @@ export function TodayScreen() {
     (lead) => lead.status === "lead" && lead.followUpOn && !mine(lead) && dayDiff(lead.followUpOn, today) <= 0,
   );
   const showReminder = book.me && !book.me.notifyEnabled && !book.snoozed && overdue.length + due.length + later.length > 0;
+  const scoped = book.leads.filter((lead) => everyone || mine(lead));
+  const tally = dayTally(scoped, today);
+  const callQueue = [...overdue, ...due].filter((lead) => telHref(lead.phone));
+  const nextCall = callQueue.find((lead) => !calledToday(lead, today)) ?? callQueue[0] ?? null;
   return (
     <>
       <p className="date-line">{longDate(today)}</p>
@@ -440,6 +444,20 @@ export function TodayScreen() {
           {due.length ? <span className="today-due">{due.length} due today</span> : null}
           {overdue.length ? <span className="overdue">{overdue.length} overdue</span> : null}
         </p>
+      ) : null}
+      <p className="day-tally">
+        <span>
+          <b>{tally.calls}</b> Call
+        </span>
+        <span>
+          <b>{tally.messages}</b> Message
+        </span>
+      </p>
+      {nextCall ? (
+        <a className="next-call" href={telHref(nextCall.phone)} onClick={() => book.noteActivity(nextCall.id, "Called")}>
+          Next call
+          <span>{nextCall.name}</span>
+        </a>
       ) : null}
       {showReminder ? (
         <div className="reminder-card">
@@ -475,6 +493,25 @@ export function TodayScreen() {
       ) : null}
     </>
   );
+}
+
+function calledToday(lead: Lead, today: string) {
+  return (lead.history || "").split("\n").some((line) => line === `${today} · Called`);
+}
+
+function dayTally(leads: Lead[], today: string) {
+  let calls = 0;
+  let messages = 0;
+  const prefix = `${today} · `;
+  for (const lead of leads) {
+    for (const line of (lead.history || "").split("\n")) {
+      if (!line.startsWith(prefix)) continue;
+      const action = line.slice(prefix.length);
+      if (action === "Called") calls += 1;
+      else if (action === "Opened WhatsApp") messages += 1;
+    }
+  }
+  return { calls, messages };
 }
 
 function compareFollow(a: Lead, b: Lead) {

@@ -314,6 +314,41 @@ h1 {
 .summary .overdue { color: var(--overdue); background: var(--overdue-soft); }
 .summary .today-due { color: var(--due); background: var(--due-soft); }
 
+.day-tally {
+  display: flex;
+  gap: 14px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.day-tally b {
+  color: var(--ink);
+  font-size: 15px;
+  margin-right: 4px;
+}
+
+.next-call {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--green);
+  color: #f7f4ee;
+  font-weight: 800;
+  text-decoration: none;
+}
+.next-call span {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .scope, .segments, .status-switch, .chips {
   display: flex;
   gap: 6px;
