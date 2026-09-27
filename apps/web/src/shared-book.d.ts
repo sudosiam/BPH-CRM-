@@ -76,6 +76,19 @@ declare module "@shared/book.mjs" {
     lead: { deletedAt?: string | null; status?: string; name?: string; phone?: string; notes?: string; tags?: unknown },
     filter?: { status?: string; tags?: unknown; query?: string },
   ): boolean;
+  export function leadEditPatch(
+    current: { status?: string; ownerId?: string },
+    next: { phone?: string; notes?: string; source?: string | null; tags?: unknown; followUpOn?: string | null },
+    name: string,
+  ): {
+    name: string;
+    phone: string;
+    notes: string;
+    source: string | null;
+    tags: string[];
+    ownerId?: string;
+    followUpOn?: string | null;
+  };
   export function followUpResult(
     kind: string,
     today: string,

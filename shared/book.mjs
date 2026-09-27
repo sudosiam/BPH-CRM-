@@ -286,6 +286,20 @@ export function customerMatches(lead, filter = {}) {
   return `${lead.name || ""} ${lead.phone || ""} ${lead.notes || ""} ${tags.join(" ")}`.toLowerCase().includes(query);
 }
 
+/** Fields kept when someone presses Save on an existing lead. A lead still open keeps its follow-up date. */
+export function leadEditPatch(current, next, name) {
+  const patch = {
+    name: String(name ?? "").trim(),
+    phone: String(next?.phone ?? "").trim(),
+    notes: String(next?.notes ?? "").trim(),
+    source: next?.source ?? null,
+    tags: normalizeTags(next?.tags),
+    ownerId: current?.ownerId,
+  };
+  if (current?.status === "lead") patch.followUpOn = next?.followUpOn || null;
+  return patch;
+}
+
 export function followUpResult(kind, today, currentFollowUp) {
   if (kind === "no-answer") return { status: "lead", followUpOn: addDays(today, 1), closedOn: null, label: "No answer" };
   if (kind === "later") return { status: "lead", followUpOn: addDays(today, 3), closedOn: null, label: "Call later" };

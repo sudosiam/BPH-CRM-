@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
+import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, leadEditPatch, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
 import { matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
@@ -1029,18 +1029,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       }
       if (next.id) {
         const id = next.id;
-        const saved = await patchLeadNow(
-          id,
-          (current) => ({
-            name,
-            phone: next.phone.trim(),
-            notes: next.notes.trim(),
-            source: next.source,
-            tags: normalizeTags(next.tags),
-            ownerId: current.ownerId,
-          }),
-          me.id,
-        );
+        const saved = await patchLeadNow(id, (current) => leadEditPatch(current, next, name), me.id);
         if (!saved) return;
         showToast("Saved");
         setEditorDirty(false);
