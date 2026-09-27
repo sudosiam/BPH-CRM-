@@ -322,6 +322,16 @@ export function quietDays(lastContactAt, today) {
   return -dayDiff(iso, today);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** True for the first 24 hours after a contact is added, whoever added it. */
+export function addedRecently(createdAt, now = Date.now()) {
+  const at = Date.parse(createdAt);
+  if (!Number.isFinite(at)) return false;
+  const age = now - at;
+  return age < DAY_MS && age > -60 * 60 * 1000;
+}
+
 export function soldThisMonth(leads, today) {
   const month = String(today).slice(0, 7);
   const rows = leads.filter((lead) => lead.status === "sold" && !lead.deletedAt && String(lead.closedOn || "").startsWith(month));

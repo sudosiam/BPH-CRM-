@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, followUpResult, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO } from "./book.mjs";
+import { customerMatches, followUpResult, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO, addedRecently } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(leadEditPatch({ status: "lead", ownerId: "a" }, { phone: " 017 ", notes: " hi ", source: "Phone", tags: ["Scooty", "Nope"], followUpOn: "2026-10-01" }, " Rina ").followUpOn, "2026-10-01");
@@ -21,6 +21,11 @@ test("follow-up results, monthly sold total, and a bad time zone", () => {
     { count: 1, amount: 100 },
   );
   assert.equal(quietDays("2026-09-01T00:00:00.000Z", "2026-09-26"), 25);
+  const noon = Date.parse("2026-09-27T12:00:00Z");
+  assert.equal(addedRecently("2026-09-27T11:00:00Z", noon), true);
+  assert.equal(addedRecently("2026-09-26T12:00:00Z", noon), false);
+  assert.equal(addedRecently("2026-09-26T12:00:01Z", noon), true);
+  assert.equal(addedRecently("not-a-date", noon), false);
   assert.equal(appendHistory("2026-09-01 · Added", "2026-09-26", "No answer"), "2026-09-01 · Added\n2026-09-26 · No answer");
   assert.equal(todayISO("Not/AZone", new Date("2026-09-26T00:00:00Z")), "2026-09-26");
   const now = Date.parse("2026-09-26T12:00:00Z");

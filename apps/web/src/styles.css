@@ -502,8 +502,28 @@ h1 {
   white-space: nowrap;
 }
 .row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+.name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-badge {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green-ink);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.7;
 }
 .row-sub { font-size: 14px; font-weight: 600; margin-top: 2px; }
 .row-owner { color: var(--muted); font-size: 13px; font-weight: 600; margin-top: 2px; }
@@ -741,11 +761,12 @@ h1 {
 .detail-id > div { min-width: 0; }
 .detail-hero .avatar { width: 64px; height: 64px; font-size: 20px; }
 .detail-hero h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: 26px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .detail-hero .meta { margin: 2px 0 0; }
 .detail-hero .status-switch { margin-top: 14px; }
