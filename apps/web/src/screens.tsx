@@ -1464,6 +1464,7 @@ export function MemberScreen() {
   }
   const mine = person.id === me.id;
   const owned = book.leads.filter((lead) => !lead.deletedAt && (lead.createdBy || lead.ownerId) === person.id);
+  const added = [...owned].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.name.localeCompare(b.name)));
   const today = todayISO(person.timezone || me.timezone);
   const open = owned.filter((lead) => lead.status === "lead").length;
   const counts = digestCounts(owned, today);
@@ -1514,6 +1515,41 @@ export function MemberScreen() {
             <span>Lost</span>
           </div>
         </div>
+      </section>
+      <section className="part">
+        <p className="part-label">Added · {added.length}</p>
+        {added.length ? (
+          <div className="group">
+            {added.map((lead) => {
+              const sub =
+                lead.status === "sold"
+                  ? { text: `Sold · ${prettyDate(lead.closedOn || today)}`, amount: lead.soldAmount, className: "quiet" }
+                  : lead.status === "lost"
+                    ? { text: `Lost · ${prettyDate(lead.closedOn || today)}`, amount: null, className: "quiet" }
+                    : { ...dueMeta(lead.followUpOn, today), amount: null };
+              return (
+                <div className="row" key={lead.id}>
+                  <button className="row-open" type="button" onClick={() => book.openLead(lead.id)}>
+                    <span className="avatar" style={{ background: tone(lead.name) }}>
+                      {initials(lead.name)}
+                    </span>
+                    <span className="row-copy">
+                      <LeadName name={lead.name} createdAt={lead.createdAt} />
+                      <span className={`row-sub ${sub.className}`}>
+                        {sub.text}
+                        {sub.amount ? <> · {rupees(sub.amount)}</> : null}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="card-block">
+            <p className="meta">No contacts added yet.</p>
+          </div>
+        )}
       </section>
       <section className="part">
         <p className="part-label">Reminders</p>
