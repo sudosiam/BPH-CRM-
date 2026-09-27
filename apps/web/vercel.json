@@ -16,6 +16,9 @@
     { "source": "/crm/", "destination": "/index.html" },
     { "source": "/crm/:path*", "destination": "/:path*" }
   ],
+  "crons": [
+    { "path": "/api/keepalive", "schedule": "15 7 * * *" }
+  ],
   "headers": [
     {
       "source": "/crm/sw.js",
