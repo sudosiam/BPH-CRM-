@@ -344,9 +344,13 @@ export async function flushOutbox(
           }
         }
         const kept = result.ok ? null : result.lead;
-        if (!kept || kept.deletedAt || (!result.ok && result.deleted)) {
+        if (!kept) {
           await db.leads.delete(item.id);
           onNotice("This lead was deleted.");
+        } else if (kept.deletedAt) {
+          if (tombstoneFresh(kept.deletedAt)) await db.leads.put(kept);
+          else await db.leads.delete(item.id);
+          if (!lead.deletedAt) onNotice("This lead was deleted.");
         } else if (lead.deletedAt && !kept.deletedAt) {
           await db.leads.put(kept);
           const actor = (await db.profiles.get(kept.updatedBy))?.displayName ?? "someone";

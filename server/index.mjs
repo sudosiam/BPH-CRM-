@@ -891,7 +891,7 @@ export function createBook(dataFile) {
             version: 1,
             createdAt: now,
             updatedAt: now,
-            deletedAt: null,
+            deletedAt: input.deletedAt ? now : null,
           };
           state.leads.push(lead);
           persist();

@@ -203,6 +203,27 @@ test("recycle bin keeps a fresh delete and drops an emptied one", async () => {
     });
     assert.equal(pushed.status, 200);
 
+    const createdGone = await json(base, "/api/leads", {
+      method: "POST",
+      token: owner.data.token,
+      body: {
+        baseVersion: null,
+        lead: {
+          id: crypto.randomUUID(),
+          name: "Never synced",
+          phone: "01700000002",
+          notes: "",
+          status: "lead",
+          followUpOn: null,
+          closedOn: null,
+          ownerId: owner.data.user.id,
+          deletedAt: "2020-01-01T00:00:00.000Z",
+        },
+      },
+    });
+    assert.equal(createdGone.status, 200);
+    assert.ok(Date.now() - Date.parse(createdGone.data.lead.deletedAt) < 60_000);
+
     const removed = await json(base, "/api/leads", {
       method: "POST",
       token: owner.data.token,
