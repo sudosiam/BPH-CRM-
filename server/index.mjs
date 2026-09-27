@@ -841,9 +841,14 @@ export function createBook(dataFile) {
     if (req.method === "GET" && url.pathname === "/api/sync/pull") {
       const since = pullSince(url.searchParams.get("cursor"));
       const cutoff = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+      const expiredIds = [];
       await mutate(async () => {
         const before = state.leads.length;
-        state.leads = state.leads.filter((lead) => !lead.deletedAt || lead.deletedAt > cutoff);
+        state.leads = state.leads.filter((lead) => {
+          if (!lead.deletedAt || lead.deletedAt > cutoff) return true;
+          if (lead.orgId === auth.org.id) expiredIds.push(lead.id);
+          return false;
+        });
         if (state.leads.length !== before) persist();
       });
       const leads = state.leads.filter((lead) => lead.orgId === auth.org.id && (!since || lead.updatedAt > since));
@@ -852,6 +857,7 @@ export function createBook(dataFile) {
       send(res, 200, {
         serverTime,
         leads: leads.map(publicLead),
+        expiredIds,
         profiles: profiles.map(publicProfile),
         org: publicOrg(auth.org, auth.profile.role),
       });
@@ -885,7 +891,7 @@ export function createBook(dataFile) {
             version: 1,
             createdAt: now,
             updatedAt: now,
-            deletedAt: null,
+            deletedAt: input.deletedAt ? now : null,
           };
           state.leads.push(lead);
           persist();
@@ -895,8 +901,12 @@ export function createBook(dataFile) {
         if (body.baseVersion == null) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: Boolean(existing.deletedAt) } };
         }
-        if (existing.deletedAt && (input.deletedAt || body.baseVersion !== existing.version)) {
-          return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+        if (existing.deletedAt) {
+          const restoring = !input.deletedAt;
+          const expiring = Boolean(input.deletedAt) && String(input.deletedAt) < existing.deletedAt;
+          if (body.baseVersion !== existing.version || (!restoring && !expiring)) {
+            return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: true } };
+          }
         }
         if (existing.version !== body.baseVersion) {
           return { status: 409, body: { error: "conflict", lead: publicLead(existing), deleted: false } };
@@ -911,7 +921,12 @@ export function createBook(dataFile) {
         existing.updatedBy = auth.user.id;
         existing.version += 1;
         existing.updatedAt = now;
-        existing.deletedAt = input.deletedAt ? now : null;
+        if (input.deletedAt) {
+          const earlier = existing.deletedAt && String(input.deletedAt) < existing.deletedAt ? String(input.deletedAt) : null;
+          existing.deletedAt = earlier || existing.deletedAt || now;
+        } else {
+          existing.deletedAt = null;
+        }
         persist();
         return { status: 200, body: { lead: publicLead(existing) }, orgId: auth.org.id };
       });
