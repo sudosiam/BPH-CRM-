@@ -85,8 +85,21 @@ declare module "@shared/book.mjs" {
     filter?: { status?: string; tags?: unknown; query?: string },
   ): boolean;
   export function leadEditPatch(
-    current: { status?: string; ownerId?: string },
-    next: { phone?: string; notes?: string; source?: string | null; tags?: unknown; followUpOn?: string | null },
+    current: { status?: "lead" | "qualified" | "sold" | "lost"; ownerId?: string; closedOn?: string | null },
+    next: {
+      phone?: string;
+      notes?: string;
+      source?: string | null;
+      tags?: unknown;
+      followUpOn?: string | null;
+      status?: "lead" | "qualified" | "sold" | "lost";
+      soldAmount?: number | null;
+      lostReason?: string | null;
+      history?: string;
+      contactCount?: number;
+      lastContactAt?: string | null;
+      closedOn?: string | null;
+    },
     name: string,
   ): {
     name: string;
@@ -96,7 +109,84 @@ declare module "@shared/book.mjs" {
     tags: string[];
     ownerId?: string;
     followUpOn?: string | null;
+    status?: "lead" | "qualified" | "sold" | "lost";
+    soldAmount?: number | null;
+    lostReason?: string | null;
+    history?: string;
+    contactCount?: number;
+    lastContactAt?: string | null;
+    closedOn?: string | null;
   };
+  export function conflictDraftFrom(local: {
+    id?: string | null;
+    name?: string;
+    phone?: string;
+    notes?: string;
+    followUpOn?: string | null;
+    ownerId?: string;
+    source?: string | null;
+    tags?: unknown;
+    status?: "lead" | "qualified" | "sold" | "lost";
+    soldAmount?: number | null;
+    lostReason?: string | null;
+    history?: string;
+    contactCount?: number;
+    lastContactAt?: string | null;
+    closedOn?: string | null;
+  }): {
+    id: string | null;
+    name: string;
+    phone: string;
+    notes: string;
+    followUpOn: string | null;
+    ownerId: string;
+    source: string | null;
+    tags: string[];
+    status?: "lead" | "qualified" | "sold" | "lost";
+    soldAmount: number | null;
+    lostReason: string | null;
+    history: string;
+    contactCount: number;
+    lastContactAt: string | null;
+    closedOn: string | null;
+  };
+  export function membershipRecord(
+    input: { userId?: string; email?: string; orgId?: string; orgName?: string; displayName?: string; inviteCode?: string | null },
+    existing?: { userId?: string; displayName?: string; inviteCode?: string | null } | null,
+  ): {
+    userId?: string;
+    email?: string;
+    orgId?: string;
+    orgName?: string;
+    inviteCode: null;
+    displayName?: string;
+  };
+  export function shouldEncodeQualified(ready: boolean, errorMessage?: string | null): boolean;
+  export function leadFromRow(row: Record<string, unknown>): {
+    id: string;
+    orgId: string;
+    name: string;
+    phone: string;
+    notes: string;
+    status: string;
+    followUpOn: string | null;
+    closedOn: string | null;
+    ownerId: string;
+    createdBy: string;
+    updatedBy: string;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: string | null;
+    soldAmount: number | null;
+    lostReason: string | null;
+    source: string | null;
+    tags: string[];
+    lastContactAt: string | null;
+    contactCount: number;
+    history: string;
+  };
+  export function leadToRow(lead: Record<string, unknown>, userId: string): Record<string, unknown>;
   export function followUpResult(
     kind: string,
     today: string,

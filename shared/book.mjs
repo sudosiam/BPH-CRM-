@@ -111,8 +111,8 @@ export function decodeQualifiedLead(lead) {
 export function digestCounts(leads, today, ownerId) {
   const rows = leads.filter((lead) => {
     if (lead.deletedAt || !isOpenStatus(lead.status) || !lead.followUpOn) return false;
-    if (!ownerId) return true;
-    return (lead.createdBy || lead.ownerId) === ownerId;
+    if (ownerId && lead.ownerId !== ownerId) return false;
+    return true;
   });
   return {
     overdue: rows.filter((lead) => dayDiff(lead.followUpOn, today) < 0).length,
@@ -336,8 +336,13 @@ export function customerMatches(lead, filter = {}) {
   return `${lead.name || ""} ${lead.phone || ""} ${lead.notes || ""} ${tags.join(" ")}`.toLowerCase().includes(query);
 }
 
-/** Fields kept when someone presses Save on an existing lead. A lead still open keeps its follow-up date. */
+function hasOwn(value, key) {
+  return Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+/** Fields kept when someone presses Save on an existing lead. A lead still open keeps its follow-up date. Outcome fields are copied only when the draft still has them, so a conflict save can put them back. */
 export function leadEditPatch(current, next, name) {
+  const status = hasOwn(next, "status") && next.status ? next.status : current?.status;
   const patch = {
     name: String(name ?? "").trim(),
     phone: String(next?.phone ?? "").trim(),
@@ -346,8 +351,115 @@ export function leadEditPatch(current, next, name) {
     tags: normalizeTags(next?.tags),
     ownerId: current?.ownerId,
   };
-  if (isOpenStatus(current?.status)) patch.followUpOn = next?.followUpOn || null;
+  if (hasOwn(next, "status") && next.status) patch.status = next.status;
+  if (isOpenStatus(status)) patch.followUpOn = next?.followUpOn || null;
+  if (patch.status && !isOpenStatus(patch.status)) {
+    patch.followUpOn = null;
+    patch.closedOn = hasOwn(next, "closedOn") ? next.closedOn || null : current?.closedOn || null;
+  } else if (patch.status && isOpenStatus(patch.status)) {
+    patch.closedOn = null;
+  }
+  if (hasOwn(next, "soldAmount")) {
+    const amount = next.soldAmount == null || next.soldAmount === "" ? null : Number(next.soldAmount);
+    patch.soldAmount = Number.isFinite(amount) ? amount : null;
+  }
+  if (hasOwn(next, "lostReason")) patch.lostReason = next.lostReason ?? null;
+  if (hasOwn(next, "history")) patch.history = String(next.history ?? "").slice(-4000);
+  if (hasOwn(next, "contactCount")) patch.contactCount = Number(next.contactCount) || 0;
+  if (hasOwn(next, "lastContactAt")) patch.lastContactAt = next.lastContactAt ?? null;
   return patch;
+}
+
+/** Local fields kept on screen when the server copy replaces the stored lead. */
+export function conflictDraftFrom(local) {
+  return {
+    id: local?.id ?? null,
+    name: String(local?.name ?? ""),
+    phone: String(local?.phone ?? ""),
+    notes: String(local?.notes ?? ""),
+    followUpOn: local?.followUpOn ?? null,
+    ownerId: String(local?.ownerId ?? ""),
+    source: local?.source ?? null,
+    tags: normalizeTags(local?.tags),
+    status: local?.status,
+    soldAmount: local?.soldAmount ?? null,
+    lostReason: local?.lostReason ?? null,
+    history: String(local?.history ?? ""),
+    contactCount: Number(local?.contactCount) || 0,
+    lastContactAt: local?.lastContactAt ?? null,
+    closedOn: local?.closedOn ?? null,
+  };
+}
+
+/** Invite codes stay in the signed-in book, not in the phone's shared membership record. */
+export function membershipRecord(input, existing) {
+  const sameUser = existing?.userId && existing.userId === input?.userId;
+  return {
+    userId: input?.userId,
+    email: input?.email,
+    orgId: input?.orgId,
+    orgName: input?.orgName,
+    inviteCode: null,
+    displayName: input?.displayName || (sameUser ? existing?.displayName : undefined),
+  };
+}
+
+/** A missing Qualified status is stored as a normal lead. Any other failure stays queued. */
+export function shouldEncodeQualified(ready, errorMessage) {
+  if (!errorMessage) return !ready;
+  return qualifiedSchemaError(errorMessage);
+}
+
+export function leadFromRow(row) {
+  const lead = {
+    id: String(row?.id ?? ""),
+    orgId: String(row?.org_id ?? ""),
+    name: String(row?.name ?? ""),
+    phone: String(row?.phone ?? ""),
+    notes: String(row?.notes ?? ""),
+    status: row?.status,
+    followUpOn: row?.follow_up_on ?? null,
+    closedOn: row?.closed_on ?? null,
+    ownerId: String(row?.owner_id ?? ""),
+    createdBy: String(row?.created_by ?? ""),
+    updatedBy: String(row?.updated_by ?? ""),
+    version: Number(row?.version),
+    createdAt: String(row?.created_at ?? ""),
+    updatedAt: String(row?.updated_at ?? ""),
+    deletedAt: row?.deleted_at ?? null,
+    soldAmount: row?.sold_amount == null ? null : Number(row.sold_amount),
+    lostReason: row?.lost_reason ?? null,
+    source: row?.source ?? null,
+    tags: normalizeTags(row?.tags),
+    lastContactAt: row?.last_contact_at ?? null,
+    contactCount: Number(row?.contact_count ?? 0),
+    history: String(row?.history ?? ""),
+  };
+  return decodeQualifiedLead(lead);
+}
+
+export function leadToRow(lead, userId) {
+  return {
+    id: lead.id,
+    org_id: lead.orgId,
+    name: lead.name,
+    phone: lead.phone || null,
+    notes: lead.notes,
+    status: lead.status,
+    follow_up_on: lead.followUpOn,
+    closed_on: lead.closedOn,
+    owner_id: lead.ownerId,
+    created_by: lead.createdBy || userId,
+    updated_by: userId,
+    deleted_at: lead.deletedAt,
+    sold_amount: lead.soldAmount,
+    lost_reason: lead.lostReason,
+    source: lead.source,
+    tags: normalizeTags(lead.tags),
+    last_contact_at: lead.lastContactAt,
+    contact_count: lead.contactCount || 0,
+    history: String(lead.history || "").slice(-4000),
+  };
 }
 
 export function followUpResult(kind, today, currentFollowUp, currentStatus) {

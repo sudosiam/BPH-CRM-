@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync, copyFileSync, unlinkSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync, statSync, createReadStream, openSync, writeSync, fsyncSync, closeSync, renameSync, copyFileSync, unlinkSync, chmodSync, fchmodSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import webpush from "web-push";
@@ -24,6 +24,54 @@ import {
 const scryptAsync = promisify(scrypt);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(root, "apps/web/dist");
+const MAX_BODY = 128 * 1024;
+const MAX_STRING = 8000;
+const HISTORY_MAX = 4000;
+
+export const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+  "content-security-policy":
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self'; manifest-src 'self'",
+};
+
+export function shouldStealLock(recorded, alive) {
+  const pid = Number(String(recorded ?? "").trim());
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  return !alive(pid);
+}
+
+export function mailTransportOptions({ host, port, secureFlag, user, pass }) {
+  const portNumber = Number(port || 587);
+  const secure = secureFlag === "1" || secureFlag === true || portNumber === 465;
+  return {
+    host,
+    port: portNumber,
+    secure,
+    requireTLS: !secure,
+    auth: user ? { user, pass: pass || "" } : undefined,
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 8000,
+  };
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function envVapid() {
+  const publicKey = process.env.BPH_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || "";
+  const privateKey = process.env.BPH_VAPID_PRIVATE_KEY || process.env.VAPID_PRIVATE_KEY || "";
+  if (!publicKey || !privateKey) return null;
+  return { publicKey, privateKey };
+}
 
 function readBookFile(file) {
   try {
@@ -34,8 +82,14 @@ function readBookFile(file) {
   }
 }
 
-export function createBook(dataFile) {
+export function createBook(dataFile, options = {}) {
   mkdirSync(path.dirname(dataFile), { recursive: true });
+  const staticRoot = options.staticDir || distDir;
+  const mailbox = [];
+  function setting(override, envName) {
+    if (override !== undefined && override !== null) return String(override);
+    return process.env[envName] || "";
+  }
   const fresh = {
     users: [],
     sessions: [],
@@ -61,13 +115,15 @@ export function createBook(dataFile) {
   if (!state.digests) state.digests = {};
   if (!state.subscriptions) state.subscriptions = [];
   if (!state.resets) state.resets = [];
-  let lastPersisted = JSON.stringify(state);
+  let lastPersisted = "";
   const lockPath = `${dataFile}.lock`;
-  if (!state.vapid) {
+  const fromEnv = envVapid();
+  if (fromEnv) state.vapid = fromEnv;
+  if (!fromEnv && (!state.vapid?.publicKey || !state.vapid?.privateKey)) {
     const fd = acquireLockSync();
     try {
       reload();
-      if (!state.vapid) {
+      if (!state.vapid?.publicKey || !state.vapid?.privateKey) {
         state.vapid = webpush.generateVAPIDKeys();
         persist();
       }
@@ -75,7 +131,13 @@ export function createBook(dataFile) {
       releaseLock(fd);
     }
   }
+  if (fromEnv) {
+    state.vapid = fromEnv;
+    persist();
+  }
   webpush.setVapidDetails("mailto:reminders@bph.local", state.vapid.publicKey, state.vapid.privateKey);
+  for (const file of [dataFile, `${dataFile}.bak`, `${dataFile}.tmp`]) tighten(file);
+  lastPersisted = JSON.stringify(storedState());
 
   let chain = Promise.resolve();
   let inLock = false;
@@ -104,7 +166,8 @@ export function createBook(dataFile) {
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       try {
-        if (Date.now() - statSync(lockPath).mtimeMs > 20000) unlinkSync(lockPath);
+        const recorded = readFileSync(lockPath, "utf8");
+        if (shouldStealLock(recorded, pidAlive)) unlinkSync(lockPath);
       } catch {
         /* The other process released it, or still holds it. */
       }
@@ -168,8 +231,38 @@ export function createBook(dataFile) {
     state.subscriptions = disk.subscriptions || [];
     state.digests = disk.digests || {};
     state.resets = disk.resets || [];
-    if (disk.vapid) state.vapid = disk.vapid;
-    lastPersisted = JSON.stringify(state);
+    const keys = envVapid();
+    if (keys) state.vapid = keys;
+    else if (disk.vapid?.publicKey && disk.vapid?.privateKey) state.vapid = disk.vapid;
+    lastPersisted = JSON.stringify(storedState());
+  }
+
+  function storedState() {
+    const keys = envVapid();
+    const vapid = keys
+      ? { publicKey: keys.publicKey }
+      : state.vapid?.publicKey
+        ? { publicKey: state.vapid.publicKey, privateKey: state.vapid.privateKey }
+        : null;
+    return {
+      users: state.users,
+      sessions: state.sessions,
+      orgs: state.orgs,
+      profiles: state.profiles,
+      leads: state.leads,
+      subscriptions: state.subscriptions,
+      digests: state.digests,
+      resets: state.resets,
+      vapid,
+    };
+  }
+
+  function tighten(file) {
+    try {
+      if (existsSync(file)) chmodSync(file, 0o600);
+    } catch {
+      /* The next write sets the mode again. */
+    }
   }
 
   function runLocked(fn) {
@@ -199,25 +292,32 @@ export function createBook(dataFile) {
     return runLocked(fn);
   }
   function persist() {
-    const payload = JSON.stringify(state);
+    const payload = JSON.stringify(storedState());
     if (payload === lastPersisted) return;
     const tmp = `${dataFile}.tmp`;
     const bak = `${dataFile}.bak`;
-    const fd = openSync(tmp, "w");
+    const fd = openSync(tmp, "w", 0o600);
     try {
       writeSync(fd, payload);
       fsyncSync(fd);
+      try {
+        fchmodSync(fd, 0o600);
+      } catch {
+        /* chmod below covers the renamed file. */
+      }
     } finally {
       closeSync(fd);
     }
     if (existsSync(dataFile)) {
       try {
         copyFileSync(dataFile, bak);
+        tighten(bak);
       } catch {
         /* The next good write replaces the backup. */
       }
     }
     renameSync(tmp, dataFile);
+    tighten(dataFile);
     lastPersisted = payload;
   }
 
@@ -273,8 +373,16 @@ export function createBook(dataFile) {
     return { ...lead };
   }
 
+  function tokenEqual(left, right) {
+    const a = Buffer.from(String(left));
+    const b = Buffer.from(String(right));
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  }
+
   function sessionUser(token) {
-    const session = state.sessions.find((item) => item.token === token && item.expiresAt > Date.now());
+    const hash = hashToken(token);
+    const session = state.sessions.find((item) => item.tokenHash && tokenEqual(item.tokenHash, hash) && item.expiresAt > Date.now());
     if (!session) return null;
     const user = state.users.find((item) => item.id === session.userId);
     if (!user) return null;
@@ -338,29 +446,77 @@ export function createBook(dataFile) {
     return null;
   }
 
+  function capStrings(value, depth = 0) {
+    if (depth > 8) throw Object.assign(new Error("That request is too large."), { status: 413 });
+    if (typeof value === "string") {
+      if (value.length > MAX_STRING) throw Object.assign(new Error("That request is too large."), { status: 413 });
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > 200) throw Object.assign(new Error("That request is too large."), { status: 413 });
+      for (const item of value) capStrings(item, depth + 1);
+      return;
+    }
+    if (value && typeof value === "object") {
+      const keys = Object.keys(value);
+      if (keys.length > 80) throw Object.assign(new Error("That request is too large."), { status: 413 });
+      for (const key of keys) capStrings(value[key], depth + 1);
+    }
+  }
+
   function readJson(req) {
     return new Promise((resolve, reject) => {
       const chunks = [];
-      req.on("data", (chunk) => chunks.push(chunk));
+      let size = 0;
+      let tooBig = false;
+      req.on("data", (chunk) => {
+        if (tooBig) return;
+        size += chunk.length;
+        if (size > MAX_BODY) {
+          tooBig = true;
+          reject(Object.assign(new Error("That request is too large."), { status: 413 }));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
       req.on("end", () => {
+        if (tooBig) return;
         if (!chunks.length) return resolve({});
         try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          capStrings(parsed);
+          resolve(parsed);
         } catch (error) {
           reject(error);
         }
       });
-      req.on("error", reject);
+      req.on("error", (error) => {
+        if (!tooBig) reject(error);
+      });
     });
   }
 
-  function send(res, status, body) {
+  function send(res, status, body, extra = {}) {
     const payload = JSON.stringify(body);
     res.writeHead(status, {
+      ...SECURITY_HEADERS,
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
+      ...extra,
     });
     res.end(payload);
+  }
+
+  function clientAddress(req) {
+    return req.socket?.remoteAddress || "local";
+  }
+
+  function boundedPassword(value) {
+    const password = String(value ?? "");
+    if (password.length > 200) return { error: "Password is too long." };
+    if (password.length < 8) return { error: "Use at least 8 characters." };
+    return { password };
   }
 
   function accountBody(auth, token) {
@@ -384,15 +540,17 @@ export function createBook(dataFile) {
     if (!["lead", "qualified", "sold", "lost"].includes(status)) return "Unknown status.";
     if (!isOpenStatus(status) && input.followUpOn) return "Sold and lost leads cannot have a follow-up.";
     if (isOpenStatus(status) && input.closedOn) return "An open lead cannot have a closed date.";
+    if (String(input.history ?? "").length > HISTORY_MAX) return "History is too long.";
     return null;
   }
 
-  async function sendDueDigests(now = new Date()) {
+  function digestJobs(now) {
+    const jobs = [];
     for (const profile of state.profiles) {
       if (!profile.notifyEnabled || profile.removedAt) continue;
       const leads = state.leads.filter((lead) => lead.orgId === profile.orgId);
       const today = todayISO(profile.timezone || "UTC", now);
-      const counts = digestCounts(leads, today);
+      const counts = digestCounts(leads, today, profile.id);
       const dueCount = counts.today + counts.overdue;
       if (
         !shouldSendDigest({
@@ -406,26 +564,46 @@ export function createBook(dataFile) {
       ) {
         continue;
       }
-      const body = digestLine(counts.today, counts.overdue);
-      const subs = state.subscriptions.filter((item) => item.userId === profile.id);
+      jobs.push({
+        profileId: profile.id,
+        today,
+        body: digestLine(counts.today, counts.overdue),
+        subs: state.subscriptions
+          .filter((item) => item.userId === profile.id)
+          .map((sub) => ({ endpoint: sub.endpoint, keys: sub.keys })),
+      });
+    }
+    return jobs;
+  }
+
+  async function planDigests(now = new Date()) {
+    return runLocked(() => digestJobs(now));
+  }
+
+  async function sendDueDigests(now = new Date()) {
+    const jobs = await planDigests(now);
+    for (const job of jobs) {
       let delivered = 0;
-      for (const sub of subs) {
+      const dead = [];
+      for (const sub of job.subs) {
         try {
           await webpush.sendNotification(
             { endpoint: sub.endpoint, keys: sub.keys },
-            JSON.stringify({ title: "Follow-ups", body }),
+            JSON.stringify({ title: "Follow-ups", body: job.body }),
           );
           delivered += 1;
         } catch (error) {
-          if (error.statusCode === 404 || error.statusCode === 410) {
-            state.subscriptions = state.subscriptions.filter((item) => item.endpoint !== sub.endpoint);
-          }
+          if (error.statusCode === 404 || error.statusCode === 410) dead.push(sub.endpoint);
         }
       }
-      if (delivered > 0) {
-        state.digests[profile.id] = today;
+      if (!delivered && !dead.length) continue;
+      await runLocked(() => {
+        if (dead.length) {
+          state.subscriptions = state.subscriptions.filter((item) => !dead.includes(item.endpoint));
+        }
+        if (delivered > 0) state.digests[job.profileId] = job.today;
         persist();
-      }
+      });
     }
   }
 
@@ -433,27 +611,35 @@ export function createBook(dataFile) {
     return createHash("sha256").update(String(token)).digest("hex");
   }
 
-  function publicOrigin(req) {
-    const configured = String(process.env.BPH_PUBLIC_URL || "").replace(/\/$/, "");
-    if (configured) return configured;
-    const host = req.headers.host || "localhost";
-    const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
-    return `${proto}://${host}`;
+  function publicOrigin() {
+    const configured = setting(options.publicUrl, "BPH_PUBLIC_URL").trim();
+    if (!configured) return "";
+    try {
+      const url = new URL(configured);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+      return url.origin;
+    } catch {
+      return "";
+    }
   }
 
   async function sendResetEmail(to, link) {
-    const host = process.env.BPH_SMTP_HOST;
+    const host = setting(options.smtpHost, "BPH_SMTP_HOST");
     if (!host) return false;
+    if (host === "test") {
+      mailbox.push({ to, link });
+      return true;
+    }
     const nodemailer = await import("nodemailer");
-    const transport = nodemailer.createTransport({
-      host,
-      port: Number(process.env.BPH_SMTP_PORT || 587),
-      secure: process.env.BPH_SMTP_SECURE === "1",
-      auth: process.env.BPH_SMTP_USER ? { user: process.env.BPH_SMTP_USER, pass: process.env.BPH_SMTP_PASS || "" } : undefined,
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 8000,
-    });
+    const transport = nodemailer.createTransport(
+      mailTransportOptions({
+        host,
+        port: setting(options.smtpPort, "BPH_SMTP_PORT") || 587,
+        secureFlag: setting(options.smtpSecure, "BPH_SMTP_SECURE"),
+        user: setting(options.smtpUser, "BPH_SMTP_USER"),
+        pass: setting(options.smtpPass, "BPH_SMTP_PASS"),
+      }),
+    );
     await transport.sendMail({
       from: process.env.BPH_SMTP_FROM || "BPH <reminders@bph.local>",
       to,
@@ -467,8 +653,36 @@ export function createBook(dataFile) {
     const next = await hashPassword(password);
     user.salt = next.salt;
     user.hash = next.hash;
-    state.sessions = state.sessions.filter((item) => item.userId !== user.id || item.token === keepToken);
+    const keepHash = keepToken ? hashToken(keepToken) : "";
+    state.sessions = state.sessions.filter((item) => item.userId !== user.id || (keepHash && item.tokenHash === keepHash));
     state.resets = (state.resets || []).filter((item) => item.userId !== user.id);
+  }
+
+  function rememberSession(token, userId) {
+    state.sessions.push({ tokenHash: hashToken(token), userId, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
+  }
+
+  function reassignProfileLeads(profileId, oldOrgId, nextOrgId) {
+    if (!oldOrgId || oldOrgId === nextOrgId) return null;
+    const referenced = state.leads.some(
+      (lead) => lead.orgId === oldOrgId && (lead.ownerId === profileId || lead.createdBy === profileId || lead.updatedBy === profileId),
+    );
+    if (!referenced) return null;
+    const others = state.profiles.filter((item) => item.orgId === oldOrgId && item.id !== profileId && !item.removedAt);
+    const keeper = others.find((item) => item.role === "owner") || others[0];
+    if (!keeper) return "This account still has leads in the other business. Ask that owner to reassign them before leaving.";
+    const now = new Date().toISOString();
+    for (const lead of state.leads) {
+      if (lead.orgId !== oldOrgId) continue;
+      const touched = lead.ownerId === profileId || lead.createdBy === profileId || lead.updatedBy === profileId;
+      if (!touched) continue;
+      if (lead.ownerId === profileId) lead.ownerId = keeper.id;
+      if (lead.createdBy === profileId) lead.createdBy = keeper.id;
+      if (lead.updatedBy === profileId) lead.updatedBy = keeper.id;
+      lead.version = (lead.version || 1) + 1;
+      lead.updatedAt = now;
+    }
+    return null;
   }
 
   async function handler(req, res) {
@@ -486,6 +700,7 @@ export function createBook(dataFile) {
           return;
         }
         res.writeHead(200, {
+          ...SECURITY_HEADERS,
           "content-type": "text/event-stream",
           "cache-control": "no-cache",
           connection: "keep-alive",
@@ -513,7 +728,7 @@ export function createBook(dataFile) {
         send(res, 400, { error: "That request was not valid JSON." });
         return;
       }
-      console.error(error);
+      if (!error.status) console.error("Request failed.");
       send(res, error.status || 500, { error: error.status ? error.message : "Something went wrong." });
     }
   }
@@ -526,19 +741,20 @@ export function createBook(dataFile) {
 
     if (req.method === "POST" && url.pathname === "/api/auth/signup") {
       const body = await readJson(req);
+      if (limited(`signup:${clientAddress(req)}`, 8)) return send(res, 429, { error: "Too many tries. Wait a few minutes." });
       const email = String(body.email ?? "").trim().toLowerCase();
-      const password = String(body.password ?? "");
+      const checked = boundedPassword(body.password);
       const displayName = String(body.displayName ?? "").trim();
       if (!email.includes("@") || email.length > 120) return send(res, 400, { error: "Enter a valid email." });
-      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
+      if (checked.error) return send(res, 400, { error: checked.error });
       if (displayName.length < 1 || displayName.length > 80) return send(res, 400, { error: "Add your name." });
       if (state.users.some((user) => user.email === email)) return send(res, 400, { error: "That email is already registered." });
-      const { salt, hash } = await hashPassword(password);
+      const { salt, hash } = await hashPassword(checked.password);
       const user = { id: crypto.randomUUID(), email, displayName, salt, hash };
       const token = randomBytes(24).toString("hex");
       await mutate(async () => {
         state.users.push(user);
-        state.sessions.push({ token, userId: user.id, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
+        rememberSession(token, user.id);
         persist();
       });
       send(res, 200, accountBody({ user, profile: null, org: null }, token));
@@ -549,12 +765,13 @@ export function createBook(dataFile) {
       const body = await readJson(req);
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
+      if (password.length > 200) return send(res, 400, { error: "Password is too long." });
       if (limited(`signin:${email}`, 20)) return send(res, 429, { error: "Too many tries. Wait a few minutes." });
       const user = state.users.find((item) => item.email === email);
       if (!user || !(await verifyPassword(password, user))) return send(res, 401, { error: "Email or password is wrong." });
       const token = randomBytes(24).toString("hex");
       await mutate(async () => {
-        state.sessions.push({ token, userId: user.id, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
+        rememberSession(token, user.id);
         persist();
       });
       const auth = sessionUser(token);
@@ -567,7 +784,7 @@ export function createBook(dataFile) {
     if (req.method === "POST" && url.pathname === "/api/auth/signout") {
       if (auth) {
         await mutate(async () => {
-          state.sessions = state.sessions.filter((item) => item.token !== auth.session.token);
+          state.sessions = state.sessions.filter((item) => item.tokenHash !== auth.session.tokenHash);
           persist();
         });
       }
@@ -577,19 +794,31 @@ export function createBook(dataFile) {
 
     if (req.method === "GET" && url.pathname === "/api/auth/session") {
       if (!auth) return send(res, 401, { error: "Sign in again." });
-      send(res, 200, accountBody(auth, auth.session.token));
+      const header = req.headers.authorization || "";
+      const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
+      send(res, 200, accountBody(auth, bearer));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/reset") {
       const body = await readJson(req);
       const email = String(body.email ?? "").trim().toLowerCase();
+      if (limited(`reset:${email}`, 5)) return send(res, 429, { error: "Too many tries. Wait a few minutes." });
       const user = state.users.find((item) => item.email === email);
-      if (!process.env.BPH_SMTP_HOST) {
+      const smtpHost = setting(options.smtpHost, "BPH_SMTP_HOST");
+      if (!smtpHost) {
         return send(res, 200, {
           ok: true,
           sent: false,
           message: "This server has no email. Ask the owner to set a new password for you.",
+        });
+      }
+      const origin = publicOrigin();
+      if (!origin) {
+        return send(res, 200, {
+          ok: true,
+          sent: false,
+          message: "This server cannot send a reset link. Ask the owner to set a new password for you.",
         });
       }
       if (user) {
@@ -601,9 +830,9 @@ export function createBook(dataFile) {
           persist();
         });
         try {
-          await sendResetEmail(email, `${publicOrigin(req)}/crm/?reset=${token}`);
-        } catch (error) {
-          console.error(error);
+          await sendResetEmail(email, `${origin}/crm/#reset=${encodeURIComponent(token)}`);
+        } catch {
+          console.error("Password reset email failed.");
           return send(res, 200, {
             ok: true,
             sent: false,
@@ -617,15 +846,15 @@ export function createBook(dataFile) {
 
     if (req.method === "POST" && url.pathname === "/api/auth/reset/confirm") {
       const body = await readJson(req);
-      const password = String(body.password ?? "");
-      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
-      const row = (state.resets || []).find((item) => item.tokenHash === hashToken(body.token) && item.expiresAt > Date.now());
+      const checked = boundedPassword(body.password);
+      if (checked.error) return send(res, 400, { error: checked.error });
+      const row = (state.resets || []).find((item) => item.tokenHash && tokenEqual(item.tokenHash, hashToken(body.token)) && item.expiresAt > Date.now());
       const user = row ? state.users.find((item) => item.id === row.userId) : null;
       if (!user) return send(res, 400, { error: "That link has expired. Ask for a new one." });
       const token = randomBytes(24).toString("hex");
       await mutate(async () => {
-        await writePassword(user, password, token);
-        state.sessions.push({ token, userId: user.id, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
+        await writePassword(user, checked.password, token);
+        rememberSession(token, user.id);
         persist();
       });
       send(res, 200, accountBody(sessionUser(token), token));
@@ -636,13 +865,16 @@ export function createBook(dataFile) {
 
     if (req.method === "POST" && url.pathname === "/api/auth/password") {
       const body = await readJson(req);
-      const password = String(body.password ?? "");
-      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
+      const checked = boundedPassword(body.password);
+      if (checked.error) return send(res, 400, { error: checked.error });
+      if (String(body.currentPassword ?? "").length > 200) return send(res, 400, { error: "Password is too long." });
       if (!(await verifyPassword(String(body.currentPassword ?? ""), auth.user))) {
         return send(res, 400, { error: "The current password is wrong." });
       }
+      const header = req.headers.authorization || "";
+      const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
       await mutate(async () => {
-        await writePassword(auth.user, password, auth.session.token);
+        await writePassword(auth.user, checked.password, bearer);
         persist();
       });
       send(res, 200, { ok: true });
@@ -678,6 +910,8 @@ export function createBook(dataFile) {
         removedAt: null,
       };
       await mutate(async () => {
+        const problem = reassignProfileLeads(auth.user.id, current?.orgId ?? null, org.id);
+        if (problem) throw Object.assign(new Error(problem), { status: 400 });
         org.inviteCode = freshCode();
         auth.user.displayName = displayName;
         profile.orgId = org.id;
@@ -718,6 +952,10 @@ export function createBook(dataFile) {
         removedAt: null,
       };
       await mutate(async () => {
+        if (!alreadyHere) {
+          const problem = reassignProfileLeads(auth.user.id, current?.orgId ?? null, org.id);
+          if (problem) throw Object.assign(new Error(problem), { status: 400 });
+        }
         auth.user.displayName = displayName;
         profile.displayName = displayName;
         profile.timezone = safeTimeZone(body.timezone);
@@ -763,14 +1001,14 @@ export function createBook(dataFile) {
     if (req.method === "POST" && url.pathname === "/api/orgs/members/password") {
       if (auth.profile.role !== "owner") return send(res, 403, { error: "Only the owner can set a password." });
       const body = await readJson(req);
-      const password = String(body.password ?? "");
-      if (password.length < 8) return send(res, 400, { error: "Use at least 8 characters." });
+      const checked = boundedPassword(body.password);
+      if (checked.error) return send(res, 400, { error: checked.error });
       if (body.memberId === auth.user.id) return send(res, 400, { error: "Change your own password from your profile." });
       const member = state.profiles.find((item) => item.id === body.memberId && item.orgId === auth.org.id && !item.removedAt);
       const user = state.users.find((item) => item.id === body.memberId);
       if (!member || !user) return send(res, 404, { error: "That person is not on the team." });
       await mutate(async () => {
-        await writePassword(user, password, null);
+        await writePassword(user, checked.password, null);
         persist();
       });
       broadcast(auth.org.id);
@@ -985,18 +1223,21 @@ export function createBook(dataFile) {
   function serveStatic(req, res, url) {
     let requested = "";
     try {
-      requested = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      requested = decodeURIComponent(url.pathname);
     } catch {
       send(res, 400, { error: "Bad path." });
       return;
     }
-    if (!existsSync(distDir)) {
+    if (requested === "/crm" || requested.startsWith("/crm/")) requested = requested.slice("/crm".length);
+    requested = requested.replace(/^\/+/, "");
+    if (!existsSync(staticRoot)) {
       send(res, 503, { error: "App build is missing. Run npm start from the repo root." });
       return;
     }
-    const filePath = path.resolve(distDir, requested);
-    const safe = filePath.startsWith(`${distDir}${path.sep}`) && existsSync(filePath) && statSync(filePath).isFile();
-    const target = safe ? filePath : path.join(distDir, "index.html");
+    const filePath = path.resolve(staticRoot, requested);
+    const rootPrefix = staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`;
+    const safe = (filePath === staticRoot || filePath.startsWith(rootPrefix)) && existsSync(filePath) && statSync(filePath).isFile();
+    const target = safe ? filePath : path.join(staticRoot, "index.html");
     const ext = path.extname(target);
     const types = {
       ".html": "text/html; charset=utf-8",
@@ -1007,12 +1248,15 @@ export function createBook(dataFile) {
       ".png": "image/png",
       ".webmanifest": "application/manifest+json",
     };
-    res.writeHead(200, { "content-type": types[ext] || "application/octet-stream" });
+    res.writeHead(200, {
+      ...SECURITY_HEADERS,
+      "content-type": types[ext] || "application/octet-stream",
+    });
     createReadStream(target).pipe(res);
   }
 
   const timer = setInterval(() => {
-    runLocked(() => sendDueDigests()).catch((error) => console.error(error));
+    sendDueDigests().catch(() => console.error("Follow-up digest failed."));
   }, 30_000);
   timer.unref?.();
   const pruneTimer = setInterval(() => {
@@ -1023,12 +1267,12 @@ export function createBook(dataFile) {
   }, 60 * 60 * 1000);
   pruneTimer.unref?.();
 
-  return { handler, sendDueDigests, state };
+  return { handler, sendDueDigests, planDigests, state, mailbox };
 }
 
-export function startServer({ port = 8787, dataFile } = {}) {
+export function startServer({ port = 8787, dataFile, ...options } = {}) {
   const file = dataFile || path.join(root, "server/data/book.json");
-  const book = createBook(file);
+  const book = createBook(file, options);
   const server = createServer(book.handler);
   return new Promise((resolve) => {
     server.listen(port, "0.0.0.0", () => {

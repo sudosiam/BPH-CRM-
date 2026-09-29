@@ -110,12 +110,16 @@ export function createHttpRemote() {
       return { sent: Boolean(data.sent), message: String(data.message || "Check your email.") };
     },
     async passwordRecovery() {
-      const token = new URLSearchParams(window.location.search).get("reset") || "";
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const query = new URLSearchParams(window.location.search);
+      const token = hash.get("reset") || query.get("reset") || "";
       if (!token) return false;
       resetToken = token;
-      const next = new URL(window.location.href);
-      next.searchParams.delete("reset");
-      window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+      hash.delete("reset");
+      query.delete("reset");
+      const nextHash = hash.toString();
+      const nextQuery = query.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${nextHash ? `#${nextHash}` : ""}`);
       return true;
     },
     async updatePassword(password: string) {

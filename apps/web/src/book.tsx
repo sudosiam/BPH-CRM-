@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, appendHistory, assignCustomerName, duplicatePhone, followUpResult, hasLocalBook, isOpenStatus, leadEditPatch, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
+import { addDays, appendHistory, assignCustomerName, conflictDraftFrom, duplicatePhone, followUpResult, hasLocalBook, isOpenStatus, leadEditPatch, leadsCsv, newId, normalizeTags, todayISO } from "@shared/book.mjs";
 import { db, logActivity, resetLocal } from "./db";
-import { matchingMembership, saveMembership } from "./membership";
+import { clearMembership, matchingMembership, saveMembership } from "./membership";
 import { getHttpToken, setHttpToken } from "./httpRemote";
 import { enableNotifications, maybeLocalDigest, showTestNotification, subscribeToPush, syncBadge } from "./notify";
 import { remote, usingSupabase } from "./remote";
@@ -32,6 +32,13 @@ export type Draft = {
   ownerId: string;
   source: string | null;
   tags: string[];
+  status?: Lead["status"];
+  soldAmount?: number | null;
+  lostReason?: string | null;
+  history?: string;
+  contactCount?: number;
+  lastContactAt?: string | null;
+  closedOn?: string | null;
 };
 
 type BookValue = {
@@ -343,16 +350,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         marked = true;
         if (metaRow && !metaRow.fullSyncComplete) await runFullSync();
         await flushOutbox(showToast, (local, server) => {
-          setConflictDraft({
-            id: server.id,
-            name: local.name,
-            phone: local.phone,
-            notes: local.notes,
-            followUpOn: local.followUpOn,
-            ownerId: local.ownerId,
-            source: local.source,
-            tags: normalizeTags(local.tags),
-          });
+          setConflictDraft(conflictDraftFrom(local));
           setDetailId(server.id);
           setStack((current) => {
             const root = rootOf(current);
@@ -721,6 +719,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
         /* Their access is already gone. */
       }
       await clearPhoneCopy();
+      clearMembership();
       try {
         await remote.signOut();
       } catch {
@@ -943,16 +942,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
         const joined = await remote.joinOrg(code, displayName, zone());
         await db.profiles.put(joined.profile);
         await tokenFor(joined.profile.id, email, joined.org, { fullSyncComplete: false, cursor: null });
-        if (!joined.org.inviteCode) {
-          saveMembership({
-            userId: joined.profile.id,
-            email,
-            orgId: joined.org.id,
-            orgName: joined.org.name,
-            inviteCode: code.trim(),
-            displayName: displayName.trim(),
-          });
-        }
+        saveMembership({
+          userId: joined.profile.id,
+          email,
+          orgId: joined.org.id,
+          orgName: joined.org.name,
+          displayName: displayName.trim(),
+        });
         setPhase("copy");
         try {
           await copyBook();
@@ -1250,6 +1246,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
         const inviteCode = await remote.regenerateCode();
         const current = await db.meta.get("local");
         if (current?.org) await db.meta.put({ ...current, org: { ...current.org, inviteCode } });
+        clearMembership();
+        if (me && org) {
+          saveMembership({
+            userId: me.id,
+            email,
+            orgId: org.id,
+            orgName: org.name,
+            displayName: me.displayName,
+          });
+        }
         setSheet(null);
         showToast("New code ready");
       } catch (reason) {
@@ -1478,19 +1484,26 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setSnoozed(true);
     },
     noteActivity(leadId, text) {
-      void logActivity(leadId, text);
       const actor = me?.id;
       if (!actor) return;
       const today = todayISO(me?.timezone || zone());
       void patchLeadNow(
         leadId,
-        (current) => ({
-          lastContactAt: new Date().toISOString(),
-          contactCount: (current.contactCount || 0) + 1,
-          history: appendHistory(current.history, today, text),
-        }),
+        (current) => {
+          const line = `${today} · ${text}`;
+          if (text === "Called" && (current.history || "").split("\n").includes(line)) return null;
+          return {
+            lastContactAt: new Date().toISOString(),
+            contactCount: (current.contactCount || 0) + 1,
+            history: appendHistory(current.history, today, text),
+          };
+        },
         actor,
-      ).then(() => scheduleSync());
+      ).then((saved) => {
+        if (!saved) return;
+        void logActivity(leadId, text);
+        scheduleSync();
+      });
     },
     applyUpdate() {
       window.dispatchEvent(new Event("bph-apply-update"));
@@ -1512,6 +1525,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     signedOut.current = true;
     window.clearTimeout(syncTimer.current);
     window.clearTimeout(retryTimer.current);
+    clearMembership();
     setHttpToken("");
     setUserId("");
     setEmail("");
