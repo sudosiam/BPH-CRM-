@@ -1,4 +1,4 @@
-import { mergeLead, mergeLeadFields, normalizeTags, pullSince } from "@shared/book.mjs";
+import { mergeLead, mergeLeadFields, normalizeTags, pullSince, qualifiedSchemaError } from "@shared/book.mjs";
 import { db } from "./db";
 import { remote } from "./remote";
 import type { Lead, LeadBase, Org, Profile } from "./types";
@@ -313,9 +313,11 @@ export async function flushOutbox(
     const items = await db.outbox.toArray();
     if (!items.length) return;
     let progressed = false;
+    let toldQualified = false;
     for (const item of items) {
+      let lead: Lead | undefined;
       try {
-        const lead = await db.leads.get(item.id);
+        lead = await db.leads.get(item.id);
         if (!lead) {
           await db.outbox.delete(item.id);
           progressed = true;
@@ -366,7 +368,25 @@ export async function flushOutbox(
         }
         await db.outbox.delete(item.id);
         progressed = true;
-      } catch {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (lead?.status === "qualified" && qualifiedSchemaError(message)) {
+          const demoted: Lead = { ...lead, status: "lead", closedOn: null };
+          try {
+            await db.leads.put(demoted);
+            const result = await remote.pushLead(demoted, item.baseVersion);
+            if (await settlePush(item, result)) {
+              if (!toldQualified) {
+                onNotice("Qualified isn't on the server yet, so this lead stayed a Lead.");
+                toldQualified = true;
+              }
+              progressed = true;
+              continue;
+            }
+          } catch {
+            /* The Lead retry failed too. Leave it queued. */
+          }
+        }
         /* Leave this change queued. The next ones still go out. */
       }
     }

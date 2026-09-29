@@ -7,6 +7,7 @@ declare module "@shared/book.mjs" {
   export function localMinutes(timeZone: string, now?: Date): number;
   export function digestLine(dueToday: number, overdue: number): string;
   export function isOpenStatus(status: string | null | undefined): boolean;
+  export function qualifiedSchemaError(message: string | null | undefined): boolean;
   export function digestCounts(
     leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null; ownerId?: string; createdBy?: string }>,
     today: string,

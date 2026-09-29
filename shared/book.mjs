@@ -62,6 +62,15 @@ export function isOpenStatus(status) {
   return status === "lead" || status === "qualified";
 }
 
+// The live book is a Postgres enum. Until `qualified` is added there, a save
+// with that status is rejected and the change stays on the phone forever.
+export function qualifiedSchemaError(message) {
+  const text = String(message || "");
+  return /invalid input value for enum lead_status/i.test(text)
+    || /follow_up_only_for_leads/i.test(text)
+    || /open_leads_are_not_closed/i.test(text);
+}
+
 export function digestCounts(leads, today, ownerId) {
   const rows = leads.filter((lead) => {
     if (lead.deletedAt || !isOpenStatus(lead.status) || !lead.followUpOn) return false;

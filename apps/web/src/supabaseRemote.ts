@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { normalizeTags, pullSince } from "@shared/book.mjs";
+import { normalizeTags, pullSince, qualifiedSchemaError } from "@shared/book.mjs";
 import type { Account, Lead, Org, Profile, Pull, PushResult } from "./types";
 
 export function resolveSupabaseUrl(value: string | undefined) {
@@ -319,6 +319,17 @@ export function createSupabaseRemote() {
       const { data, error } = await supabase.from("profiles").update(row).eq("id", userId).select("*").single();
       if (error) throw new Error(error.message);
       return mapProfile(data);
+    },
+    async qualifiedReady() {
+      try {
+        const { error } = await supabase.from("leads").select("id").eq("status", "qualified").limit(1);
+        if (!error || isNetworkError(error)) return true;
+        return !qualifiedSchemaError(error.message);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (isNetworkError({ message })) return true;
+        return !qualifiedSchemaError(message);
+      }
     },
     async pull(cursor: string | null): Promise<Pull> {
       const since = pullSince(cursor);

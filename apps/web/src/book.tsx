@@ -1079,6 +1079,10 @@ export function BookProvider({ children }: { children: ReactNode }) {
     async setStatus(status) {
       const current = detailId ? await db.leads.get(detailId) : null;
       if (!current || current.status === status) return;
+      if (status === "qualified" && !(await remote.qualifiedReady())) {
+        showToast("Qualified isn't on the server yet, so this lead stayed a Lead.");
+        return;
+      }
       const today = todayISO(me?.timezone || zone());
       const previous = { ...current };
       await changeLead(
