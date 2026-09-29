@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBook, startServer } from "./index.mjs";
+import { createBook, mailTransportOptions, shouldStealLock, startServer } from "./index.mjs";
 import {
   shouldSendDigest,
   digestCounts,
@@ -18,11 +18,11 @@ import {
   leadsCsv,
   todayISO,
 } from "../shared/book.mjs";
-async function boot() {
+async function boot(options = {}) {
   const dataFile = path.join(mkdtempSync(path.join(tmpdir(), "bph-")), "book.json");
-  const started = await startServer({ port: 0, dataFile });
+  const started = await startServer({ port: 0, dataFile, ...options });
   const base = `http://127.0.0.1:${started.port}`;
-  return { ...started, base };
+  return { ...started, base, dataFile };
 }
 
 async function json(base, pathName, { method = "GET", token, body } = {}) {
@@ -383,7 +383,7 @@ test("digest stays quiet until the chosen time and when nothing is due", () => {
       "2026-09-25",
       "a",
     ),
-    { today: 2, overdue: 0 },
+    { today: 1, overdue: 0 },
   );
   assert.equal(digestLine(1, 1), "1 due today · 1 overdue");
   assert.equal(digestLine(0, 0), "");
@@ -728,6 +728,275 @@ test("owner can set a password and a person can change their own", async () => {
       body: { currentPassword: "nope", password: "password4" },
     });
     assert.equal(wrong.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test("lock steal, mail TLS, and a hashed session file", () => {
+  assert.equal(shouldStealLock("123", () => false), true);
+  assert.equal(shouldStealLock("123", () => true), false);
+  assert.equal(shouldStealLock("", () => false), false);
+  assert.equal(shouldStealLock("nope", () => false), false);
+  const startTls = mailTransportOptions({ host: "smtp.example", port: 587, secureFlag: "", user: "", pass: "" });
+  assert.equal(startTls.requireTLS, true);
+  assert.equal(startTls.secure, false);
+  const implicit = mailTransportOptions({ host: "smtp.example", port: 465, secureFlag: "", user: "a", pass: "b" });
+  assert.equal(implicit.secure, true);
+  assert.equal(implicit.requireTLS, false);
+});
+
+test("script URL is JavaScript, sign-out ends the session, and reset ignores Host", async () => {
+  const staticDir = path.join(mkdtempSync(path.join(tmpdir(), "bph-dist-")), "dist");
+  mkdirSync(path.join(staticDir, "assets"), { recursive: true });
+  writeFileSync(path.join(staticDir, "index.html"), "<!doctype html><html><title>shell</title></html>");
+  writeFileSync(path.join(staticDir, "assets", "app.js"), "console.log('bph-script')");
+  const { server, base, book, dataFile } = await boot({ staticDir, smtpHost: "test", publicUrl: "https://book.example" });
+  try {
+    const script = await fetch(`${base}/crm/assets/app.js`);
+    const source = await script.text();
+    assert.match(script.headers.get("content-type") || "", /javascript/i);
+    assert.match(source, /bph-script/);
+    assert.doesNotMatch(source, /<html/i);
+    assert.equal(script.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(script.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(script.headers.get("x-frame-options"), "DENY");
+    assert.match(script.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
+    assert.equal(script.headers.get("strict-transport-security"), null);
+
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    assert.equal(owner.status, 200);
+    const saved = readFileSync(dataFile, "utf8");
+    assert.equal(saved.includes(owner.data.token), false);
+    assert.match(saved, /tokenHash/);
+    assert.equal(statSync(dataFile).mode & 0o777, 0o600);
+    if (existsSync(`${dataFile}.bak`)) assert.equal(statSync(`${dataFile}.bak`).mode & 0o777, 0o600);
+    const session = await json(base, "/api/auth/session", { token: owner.data.token });
+    assert.equal(session.status, 200);
+    const rawSession = await fetch(`${base}/api/auth/session`, { headers: { authorization: `Bearer ${owner.data.token}` } });
+    assert.equal(rawSession.headers.get("x-frame-options"), "DENY");
+    const signedOut = await json(base, "/api/auth/signout", { method: "POST", token: owner.data.token });
+    assert.equal(signedOut.status, 200);
+    const gone = await json(base, "/api/auth/session", { token: owner.data.token });
+    assert.equal(gone.status, 401);
+
+    const again = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1" },
+    });
+    const reset = await fetch(`${base}/api/auth/reset`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: "evil.example",
+        "x-forwarded-proto": "https",
+      },
+      body: JSON.stringify({ email: "rafi@bph.example" }),
+    });
+    const resetBody = await reset.json();
+    assert.equal(reset.status, 200);
+    assert.equal(resetBody.sent, true);
+    assert.equal(book.mailbox.length, 1);
+    assert.match(book.mailbox[0].link, /^https:\/\/book\.example\/crm\/#reset=/);
+    assert.doesNotMatch(book.mailbox[0].link, /evil/);
+    const token = new URL(book.mailbox[0].link).hash.slice("#reset=".length);
+    const confirm = await json(base, "/api/auth/reset/confirm", {
+      method: "POST",
+      body: { token: decodeURIComponent(token), password: "password9" },
+    });
+    assert.equal(confirm.status, 200);
+    const stale = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1" },
+    });
+    assert.equal(stale.status, 401);
+    const fresh = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password9" },
+    });
+    assert.equal(fresh.status, 200);
+    assert.equal(again.status, 200);
+
+    const longNotes = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "big@bph.example", password: "password1", displayName: "x".repeat(9000) },
+    });
+    assert.equal(longNotes.status, 413);
+  } finally {
+    server.close();
+  }
+});
+
+test("signup and reset are rate limited, and a reset without a public URL does not use Host", async () => {
+  const { server, base, book } = await boot({ smtpHost: "test", publicUrl: "" });
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    assert.equal(owner.status, 200);
+    const blocked = await fetch(`${base}/api/auth/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json", host: "evil.example", "x-forwarded-proto": "https" },
+      body: JSON.stringify({ email: "rafi@bph.example" }),
+    });
+    const body = await blocked.json();
+    assert.equal(blocked.status, 200);
+    assert.equal(body.sent, false);
+    assert.equal(book.mailbox.length, 0);
+    let last = 200;
+    for (let i = 0; i < 6; i += 1) {
+      const response = await json(base, "/api/auth/reset", { method: "POST", body: { email: "rafi@bph.example" } });
+      last = response.status;
+    }
+    assert.equal(last, 429);
+    let signupStatus = 200;
+    for (let i = 0; i < 9; i += 1) {
+      const response = await json(base, "/api/auth/signup", {
+        method: "POST",
+        body: { email: "not-an-email", password: "x", displayName: "x" },
+      });
+      signupStatus = response.status;
+    }
+    assert.equal(signupStatus, 429);
+  } finally {
+    server.close();
+  }
+});
+
+test("only the owner of a due lead is notified, a member gets 403, and leaving reassigns leads", async () => {
+  const { server, base, book } = await boot();
+  try {
+    const owner = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "rafi@bph.example", password: "password1", displayName: "Rafi" },
+    });
+    const created = await json(base, "/api/orgs", {
+      method: "POST",
+      token: owner.data.token,
+      body: { name: "BPH", displayName: "Rafi", timezone: "UTC" },
+    });
+    const mate = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "nadia@bph.example", password: "password1", displayName: "Nadia" },
+    });
+    const joined = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: mate.data.token,
+      body: { code: created.data.org.inviteCode, displayName: "Nadia", timezone: "UTC" },
+    });
+    assert.equal(joined.status, 200);
+    const denied = await json(base, "/api/orgs/invite/regenerate", { method: "POST", token: mate.data.token });
+    assert.equal(denied.status, 403);
+    const template = await json(base, "/api/orgs/template", { method: "POST", token: mate.data.token, body: { template: "Hi" } });
+    assert.equal(template.status, 403);
+    const remove = await json(base, "/api/orgs/members/remove", {
+      method: "POST",
+      token: mate.data.token,
+      body: { memberId: owner.data.user.id },
+    });
+    assert.equal(remove.status, 403);
+    const password = await json(base, "/api/orgs/members/password", {
+      method: "POST",
+      token: mate.data.token,
+      body: { memberId: owner.data.user.id, password: "password9" },
+    });
+    assert.equal(password.status, 403);
+    const transfer = await json(base, "/api/orgs/transfer", {
+      method: "POST",
+      token: mate.data.token,
+      body: { memberId: mate.data.user.id },
+    });
+    assert.equal(transfer.status, 403);
+
+    const oldCode = created.data.org.inviteCode;
+    const regenerated = await json(base, "/api/orgs/invite/regenerate", { method: "POST", token: owner.data.token });
+    assert.equal(regenerated.status, 200);
+    assert.notEqual(regenerated.data.inviteCode, oldCode);
+    const stranger = await json(base, "/api/auth/signup", {
+      method: "POST",
+      body: { email: "sam@bph.example", password: "password1", displayName: "Sam" },
+    });
+    const staleCode = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: stranger.data.token,
+      body: { code: oldCode, displayName: "Sam", timezone: "UTC" },
+    });
+    assert.equal(staleCode.status, 400);
+    const freshCode = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: stranger.data.token,
+      body: { code: regenerated.data.inviteCode, displayName: "Sam", timezone: "UTC" },
+    });
+    assert.equal(freshCode.status, 200);
+
+    const leadId = crypto.randomUUID();
+    const added = await json(base, "/api/leads", {
+      method: "POST",
+      token: mate.data.token,
+      body: {
+        baseVersion: null,
+        lead: { id: leadId, name: "Customer 1", phone: "1", notes: "", status: "lead", followUpOn: "2026-09-26", closedOn: null },
+      },
+    });
+    assert.equal(added.status, 200);
+    assert.equal(added.data.lead.ownerId, mate.data.user.id);
+    const longHistory = await json(base, "/api/leads", {
+      method: "POST",
+      token: mate.data.token,
+      body: {
+        baseVersion: added.data.lead.version,
+        lead: { ...added.data.lead, history: "h".repeat(4001) },
+      },
+    });
+    assert.equal(longHistory.status, 400);
+    await json(base, "/api/profile", {
+      method: "PATCH",
+      token: mate.data.token,
+      body: { notifyEnabled: true, notifyMinute: 0, timezone: "UTC" },
+    });
+    await json(base, "/api/profile", {
+      method: "PATCH",
+      token: owner.data.token,
+      body: { notifyEnabled: true, notifyMinute: 0, timezone: "UTC" },
+    });
+    const jobs = await book.planDigests(new Date("2026-09-26T12:00:00Z"));
+    assert.deepEqual(
+      jobs.map((job) => job.profileId),
+      [mate.data.user.id],
+    );
+
+    const removed = await json(base, "/api/orgs/members/remove", {
+      method: "POST",
+      token: owner.data.token,
+      body: { memberId: mate.data.user.id },
+    });
+    assert.equal(removed.status, 200);
+    const returned = await json(base, "/api/auth/signin", {
+      method: "POST",
+      body: { email: "nadia@bph.example", password: "password1" },
+    });
+    const other = await json(base, "/api/orgs", {
+      method: "POST",
+      token: returned.data.token,
+      body: { name: "Other", displayName: "Nadia", timezone: "UTC" },
+    });
+    assert.equal(other.status, 200);
+    const same = await json(base, "/api/orgs/join", {
+      method: "POST",
+      token: stranger.data.token,
+      body: { code: regenerated.data.inviteCode, displayName: "Sam", timezone: "UTC" },
+    });
+    assert.equal(same.status, 200);
+    assert.equal(same.data.profile.role, "member");
+    const pull = await json(base, "/api/sync/pull", { token: owner.data.token });
+    const lead = pull.data.leads.find((item) => item.id === leadId);
+    assert.equal(lead.ownerId, owner.data.user.id);
+    assert.equal(lead.createdBy, owner.data.user.id);
+    assert.equal(lead.updatedBy, owner.data.user.id);
   } finally {
     server.close();
   }

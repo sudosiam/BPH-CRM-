@@ -1,55 +1,47 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { timingSafeEqual } from "node:crypto";
 import webpush from "npm:web-push@3.6.7";
+import { digestCounts, digestLine, shouldSendDigest, todayISO } from "../../../shared/book.mjs";
 
-function safeZone(timeZone: string) {
-  try {
-    new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
-    return timeZone;
-  } catch {
-    return "UTC";
-  }
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
-function todayISO(timeZone: string, now: Date) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: safeZone(timeZone),
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
+function safeEqual(left: string, right: string) {
+  const a = new TextEncoder().encode(left);
+  const b = new TextEncoder().encode(right);
+  if (a.byteLength !== b.byteLength) return false;
+  return timingSafeEqual(a, b);
 }
 
-function localMinutes(timeZone: string, now: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: safeZone(timeZone),
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
-  return get("hour") * 60 + get("minute");
+function authorized(req: Request) {
+  const expected = Deno.env.get("BPH_FUNCTION_KEY") ?? "";
+  const anon = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const header = req.headers.get("authorization") ?? "";
+  const matched = /^Bearer\s+(\S+)\s*$/i.exec(header);
+  const bearer = matched?.[1] ?? "";
+  if (!expected || !bearer) return false;
+  if (anon && safeEqual(bearer, anon)) return false;
+  return safeEqual(bearer, expected);
 }
 
-function dayDiff(iso: string, today: string) {
-  const a = Date.parse(`${iso}T00:00:00Z`);
-  const b = Date.parse(`${today}T00:00:00Z`);
-  return Math.round((a - b) / 86400000);
-}
+Deno.serve(async (req) => {
+  if (!authorized(req)) return json({ error: "Unauthorized" }, 401);
 
-Deno.serve(async () => {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL") ?? "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   );
   const publicKey = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
   const privateKey = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
-  if (!publicKey || !privateKey) {
-    return new Response(JSON.stringify({ sent: 0, error: "VAPID keys are not set" }), { status: 500 });
-  }
+  if (!publicKey || !privateKey) return json({ error: "Could not send reminders." }, 500);
   webpush.setVapidDetails(Deno.env.get("VAPID_SUBJECT") || "mailto:reminders@bph.local", publicKey, privateKey);
-  await supabase.rpc("purge_tombstones");
+
+  const purged = await supabase.rpc("purge_tombstones");
+  if (purged.error) return json({ error: "Could not send reminders." }, 500);
 
   const now = new Date();
   const { data: profiles, error } = await supabase
@@ -57,37 +49,53 @@ Deno.serve(async () => {
     .select("id, org_id, timezone, notify_minute, last_digest_on")
     .eq("notify_enabled", true)
     .is("removed_at", null);
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) return json({ error: "Could not send reminders." }, 500);
 
   let sent = 0;
   for (const profile of profiles ?? []) {
     const timeZone = profile.timezone || "UTC";
     const today = todayISO(timeZone, now);
-    if (profile.last_digest_on === today) continue;
-    if (localMinutes(timeZone, now) < profile.notify_minute) continue;
-
-    const { data: leads } = await supabase
+    const { data: leads, error: leadError } = await supabase
       .from("leads")
       .select("follow_up_on, status, deleted_at, owner_id")
       .eq("org_id", profile.org_id)
+      .eq("owner_id", profile.id)
       .in("status", ["lead", "qualified"])
       .is("deleted_at", null);
+    if (leadError) return json({ error: "Could not send reminders." }, 500);
 
-    const open = (leads ?? []).filter((lead) => lead.follow_up_on);
-    const dueToday = open.filter((lead) => dayDiff(lead.follow_up_on, today) === 0).length;
-    const overdue = open.filter((lead) => dayDiff(lead.follow_up_on, today) < 0).length;
-    if (dueToday + overdue === 0) continue;
+    const counts = digestCounts(
+      (leads ?? []).map((lead) => ({
+        followUpOn: lead.follow_up_on,
+        status: lead.status,
+        deletedAt: lead.deleted_at,
+        ownerId: lead.owner_id,
+      })),
+      today,
+      profile.id,
+    );
+    const dueCount = counts.today + counts.overdue;
+    if (
+      !shouldSendDigest({
+        notifyEnabled: true,
+        notifyMinute: profile.notify_minute,
+        timeZone,
+        lastDigestOn: profile.last_digest_on,
+        now,
+        dueCount,
+      })
+    ) {
+      continue;
+    }
 
-    const parts = [];
-    if (dueToday) parts.push(`${dueToday} due today`);
-    if (overdue) parts.push(`${overdue} overdue`);
+    const body = digestLine(counts.today, counts.overdue);
     const { data: subs } = await supabase.from("push_subscriptions").select("endpoint, p256dh, auth").eq("user_id", profile.id);
     let delivered = 0;
     for (const sub of subs ?? []) {
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify({ title: "Follow-ups", body: parts.join(" · ") }),
+          JSON.stringify({ title: "Follow-ups", body }),
         );
         delivered += 1;
         sent += 1;
@@ -103,5 +111,5 @@ Deno.serve(async () => {
     }
   }
 
-  return new Response(JSON.stringify({ sent }), { headers: { "content-type": "application/json" } });
+  return json({ sent });
 });

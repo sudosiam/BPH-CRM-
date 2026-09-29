@@ -1,6 +1,6 @@
 export default async function handler(request, response) {
   const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.authorization !== `Bearer ${secret}`) {
+  if (!secret || request.headers.authorization !== `Bearer ${secret}`) {
     response.status(401).json({ ok: false });
     return;
   }

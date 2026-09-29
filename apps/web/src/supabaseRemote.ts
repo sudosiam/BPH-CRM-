@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { decodeQualifiedLead, encodeQualifiedLead, normalizeTags, pullSince, qualifiedSchemaError } from "@shared/book.mjs";
+import { encodeQualifiedLead, leadFromRow, leadToRow, pullSince, qualifiedSchemaError, shouldEncodeQualified } from "@shared/book.mjs";
 import type { Account, Lead, Org, Profile, Pull, PushResult } from "./types";
 
 export function resolveSupabaseUrl(value: string | undefined) {
@@ -9,35 +9,8 @@ export function resolveSupabaseUrl(value: string | undefined) {
   return `https://${raw}.supabase.co`;
 }
 
-function mapLead(row: Record<string, unknown>): Lead {
-  return {
-    id: String(row.id),
-    orgId: String(row.org_id),
-    name: String(row.name),
-    phone: String(row.phone ?? ""),
-    notes: String(row.notes ?? ""),
-    status: row.status as Lead["status"],
-    followUpOn: (row.follow_up_on as string | null) ?? null,
-    closedOn: (row.closed_on as string | null) ?? null,
-    ownerId: String(row.owner_id),
-    createdBy: String(row.created_by),
-    updatedBy: String(row.updated_by),
-    version: Number(row.version),
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-    deletedAt: (row.deleted_at as string | null) ?? null,
-    soldAmount: row.sold_amount == null ? null : Number(row.sold_amount),
-    lostReason: (row.lost_reason as string | null) ?? null,
-    source: (row.source as string | null) ?? null,
-    tags: normalizeTags(row.tags),
-    lastContactAt: (row.last_contact_at as string | null) ?? null,
-    contactCount: Number(row.contact_count ?? 0),
-    history: String(row.history ?? ""),
-  };
-}
-
 function readLead(row: Record<string, unknown>): Lead {
-  return decodeQualifiedLead(mapLead(row));
+  return leadFromRow(row) as Lead;
 }
 
 function mapProfile(row: Record<string, unknown>): Profile {
@@ -63,27 +36,7 @@ function mapOrg(row: Record<string, unknown>, role: Profile["role"] | undefined)
 }
 
 function toRow(lead: Lead, userId: string) {
-  return {
-    id: lead.id,
-    org_id: lead.orgId,
-    name: lead.name,
-    phone: lead.phone || null,
-    notes: lead.notes,
-    status: lead.status,
-    follow_up_on: lead.followUpOn,
-    closed_on: lead.closedOn,
-    owner_id: lead.ownerId,
-    created_by: lead.createdBy || userId,
-    updated_by: userId,
-    deleted_at: lead.deletedAt,
-    sold_amount: lead.soldAmount,
-    lost_reason: lead.lostReason,
-    source: lead.source,
-    tags: normalizeTags(lead.tags),
-    last_contact_at: lead.lastContactAt,
-    contact_count: lead.contactCount || 0,
-    history: lead.history || "",
-  };
+  return leadToRow(lead, userId);
 }
 
 const LEAD_EXTRAS = ["sold_amount", "lost_reason", "source", "tags", "last_contact_at", "contact_count", "history"] as const;
@@ -395,12 +348,13 @@ export function createSupabaseRemote() {
       const userId = (await supabase.auth.getUser()).data.user?.id ?? lead.updatedBy;
       const send = (payload: Lead) => writeLead(supabase, toRow(payload, userId), payload.id, baseVersion);
       if (lead.status !== "qualified") return send(lead);
-      if (await this.qualifiedReady()) {
+      const ready = await this.qualifiedReady();
+      if (!shouldEncodeQualified(ready, null)) {
         try {
           return await send(lead);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          if (!qualifiedSchemaError(message)) throw error;
+          if (!shouldEncodeQualified(ready, message)) throw error;
         }
       }
       return send(encodeQualifiedLead(lead));

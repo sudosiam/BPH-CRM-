@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, isOpenStatus, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO, unmarkQualifiedHistory } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
+import { usingSupabase } from "./remote";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
 import { IconChat, IconDownload, IconRupee } from "./icons";
@@ -564,7 +565,14 @@ function LeadSection({ title, className, rows, today }: { title: string; classNa
                 </span>
               </button>
               {call ? (
-                <a className="call" href={call}>
+                <a
+                  className="call"
+                  href={call}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    book.noteActivity(lead.id, "Called");
+                  }}
+                >
                   Call
                 </a>
               ) : null}
@@ -592,7 +600,7 @@ export function LeadsScreen() {
     .filter((lead) => !mine || (lead.createdBy || lead.ownerId) === book.me?.id)
     .filter((lead) => !query || `${lead.name} ${lead.phone} ${lead.notes}`.toLowerCase().includes(query))
     .sort((a, b) => {
-      if (book.segment === "lead") {
+      if (isOpenStatus(book.segment)) {
         if (!a.followUpOn && !b.followUpOn) return a.name.localeCompare(b.name);
         if (!a.followUpOn) return 1;
         if (!b.followUpOn) return -1;
@@ -1000,35 +1008,56 @@ function FollowChips({ selected, today, onPick }: { selected: string | null; tod
   );
 }
 
+function editorDraft(
+  base: Draft | Lead | null | undefined,
+  existing: Lead | null | undefined,
+  meId: string,
+  keepOutcome: boolean,
+  today: string,
+): Draft {
+  if (!base) {
+    return {
+      id: null,
+      name: "",
+      phone: "",
+      notes: "",
+      followUpOn: addDays(today, 1),
+      ownerId: meId,
+      source: null,
+      tags: [],
+    };
+  }
+  const draft: Draft = {
+    id: base.id,
+    name: base.name,
+    phone: base.phone,
+    notes: base.notes,
+    followUpOn: base.followUpOn,
+    ownerId: base.ownerId || existing?.ownerId || meId,
+    source: base.source ?? null,
+    tags: normalizeTags(base.tags),
+  };
+  if (!keepOutcome) return draft;
+  if (base.status) draft.status = base.status;
+  if ("soldAmount" in base) draft.soldAmount = base.soldAmount ?? null;
+  if ("lostReason" in base) draft.lostReason = base.lostReason ?? null;
+  if ("history" in base) draft.history = String(base.history ?? "");
+  if ("contactCount" in base) draft.contactCount = Number(base.contactCount) || 0;
+  if ("lastContactAt" in base) draft.lastContactAt = base.lastContactAt ?? null;
+  if ("closedOn" in base) draft.closedOn = base.closedOn ?? null;
+  return draft;
+}
+
 export function EditScreen() {
   const book = useBook();
   const existing = book.detailId ? book.leads.find((lead) => lead.id === book.detailId) : null;
   const today = todayISO(book.me?.timezone);
   const preset = book.conflictDraft && book.conflictDraft.id === (existing?.id ?? null) ? book.conflictDraft : null;
-  const [draft, setDraft] = useState<Draft>(() => {
-    const base = preset || existing;
-    return base
-      ? {
-          id: base.id,
-          name: base.name,
-          phone: base.phone,
-          notes: base.notes,
-          followUpOn: base.followUpOn,
-          ownerId: "ownerId" in base ? base.ownerId : existing?.ownerId || "",
-          source: base.source ?? null,
-          tags: normalizeTags("tags" in base ? base.tags : []),
-        }
-      : {
-          id: null,
-          name: "",
-          phone: "",
-          notes: "",
-          followUpOn: addDays(today, 1),
-          ownerId: book.me?.id || "",
-          source: null,
-          tags: [],
-        };
-  });
+  const [draft, setDraft] = useState<Draft>(() => editorDraft(preset || existing, existing, book.me?.id || "", Boolean(preset), today));
+  useEffect(() => {
+    if (!preset) return;
+    setDraft(editorDraft(preset, existing, book.me?.id || "", true, today));
+  }, [preset]);
   const [formError, setFormError] = useState("");
   function update(next: Draft) {
     setDraft(next);
@@ -1569,7 +1598,7 @@ export function MemberScreen() {
   const sold = soldThisMonth(owned, today);
   const lost = owned.filter((lead) => lead.status === "lost").length;
   const time = clock(person.notifyMinute);
-  const alertCounts = digestCounts(book.leads, today);
+  const alertCounts = digestCounts(book.leads, today, person.id);
   const line = digestLine(alertCounts.today, alertCounts.overdue);
   return (
     <div className="settings">
@@ -1674,7 +1703,7 @@ export function MemberScreen() {
                 <p className="push-title">Follow-ups</p>
                 <p className="push-body">{line || "Quiet that day. Nothing is due."}</p>
               </div>
-              <p className="meta">Everyone with alerts on gets this at the time they chose. It counts every open follow-up in the book.</p>
+              <p className="meta">This alert counts only the open follow-ups you own.</p>
               <button className="ghost wide" type="button" onClick={() => void book.sendTestAlert()}>
                 Send a test alert
               </button>
@@ -1695,6 +1724,8 @@ export function MemberScreen() {
           <p className="part-label">Password</p>
           {mine ? (
             <PasswordEditor requireCurrent onSave={(current, next) => book.changePassword(current, next)} />
+          ) : usingSupabase ? (
+            <p className="meta">Ask them to use Forgot password. This book sends the reset email.</p>
           ) : (
             <PasswordEditor onSave={(_current, next) => book.setMemberPassword(person.id, next)} />
           )}

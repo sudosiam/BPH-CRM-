@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, digestCounts, followUpResult, isOpenStatus, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, qualifiedSchemaError, encodeQualifiedLead, decodeQualifiedLead, historyMarksQualified, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO, addedRecently } from "./book.mjs";
+import { customerMatches, digestCounts, followUpResult, isOpenStatus, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, qualifiedSchemaError, encodeQualifiedLead, decodeQualifiedLead, historyMarksQualified, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO, addedRecently, conflictDraftFrom, membershipRecord, shouldEncodeQualified, leadFromRow, leadToRow } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(leadEditPatch({ status: "lead", ownerId: "a" }, { phone: " 017 ", notes: " hi ", source: "Phone", tags: ["Scooty", "Nope"], followUpOn: "2026-10-01" }, " Rina ").followUpOn, "2026-10-01");
@@ -108,4 +108,61 @@ test("follow-up results, monthly sold total, and a bad time zone", () => {
   );
   assert.deepEqual(clash.conflicts, ["name"]);
   assert.equal(clash.lead.name, "Server");
+});
+
+test("qualified upload, owner digest, conflict draft, and invite storage", () => {
+  assert.equal(shouldEncodeQualified(true, null), false);
+  assert.equal(shouldEncodeQualified(false, null), true);
+  assert.equal(shouldEncodeQualified(true, 'invalid input value for enum lead_status: "qualified"'), true);
+  assert.equal(shouldEncodeQualified(true, "Could not sync."), false);
+  const row = leadToRow(
+    { id: "1", orgId: "o", name: "Ada", phone: "", notes: "", status: "qualified", followUpOn: "2026-09-26", closedOn: null, ownerId: "a", createdBy: "a", history: "note", contactCount: 2, tags: ["Scooty"] },
+    "a",
+  );
+  assert.equal(row.status, "qualified");
+  assert.equal(String(row.history).length <= 4000, true);
+  const stored = leadFromRow({ ...row, status: "lead", history: encodeQualifiedLead({ status: "qualified", history: "note" }).history });
+  assert.equal(stored.status, "qualified");
+  assert.equal(stored.history, "note");
+  assert.deepEqual(
+    digestCounts(
+      [
+        { status: "lead", followUpOn: "2026-09-26", ownerId: "owner", deletedAt: null },
+        { status: "qualified", followUpOn: "2026-09-25", ownerId: "mate", deletedAt: null },
+      ],
+      "2026-09-26",
+      "owner",
+    ),
+    { today: 1, overdue: 0 },
+  );
+  const draft = conflictDraftFrom({
+    id: "1",
+    name: "Ada",
+    phone: "9",
+    notes: "n",
+    followUpOn: null,
+    ownerId: "a",
+    source: "Phone",
+    tags: ["Scooty"],
+    status: "sold",
+    soldAmount: 40,
+    lostReason: null,
+    history: "2026-09-26 · Called",
+    contactCount: 3,
+    lastContactAt: "2026-09-26T00:00:00.000Z",
+    closedOn: "2026-09-26",
+  });
+  const patch = leadEditPatch({ status: "lead", ownerId: "a" }, draft, "Ada");
+  assert.equal(patch.status, "sold");
+  assert.equal(patch.soldAmount, 40);
+  assert.equal(patch.history, "2026-09-26 · Called");
+  assert.equal(patch.contactCount, 3);
+  assert.equal(patch.closedOn, "2026-09-26");
+  assert.equal(patch.followUpOn, null);
+  const remembered = membershipRecord(
+    { userId: "m", email: "m@bph.example", orgId: "o", orgName: "BPH", inviteCode: "ABCD2345", displayName: "Mina" },
+    { userId: "owner", inviteCode: "ZZZZ2345", displayName: "Rafi" },
+  );
+  assert.equal(remembered.inviteCode, null);
+  assert.equal(remembered.displayName, "Mina");
 });

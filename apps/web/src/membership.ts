@@ -1,4 +1,4 @@
-import { membershipMatches } from "@shared/book.mjs";
+import { membershipMatches, membershipRecord } from "@shared/book.mjs";
 
 const KEY = "bph-membership";
 
@@ -17,7 +17,7 @@ export function readMembership(): Membership | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Membership;
     if (!parsed?.orgId || !parsed.orgName) return null;
-    return parsed;
+    return { ...parsed, inviteCode: null };
   } catch {
     return null;
   }
@@ -25,9 +25,17 @@ export function readMembership(): Membership | null {
 
 export function writeMembership(record: Membership) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(record));
+    localStorage.setItem(KEY, JSON.stringify({ ...record, inviteCode: null }));
   } catch {
     /* The book still opens. The phone may block storage. */
+  }
+}
+
+export function clearMembership() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* Sign-out still drops the signed-in copy. */
   }
 }
 
@@ -45,14 +53,14 @@ export function saveMembership(input: {
   displayName?: string;
 }) {
   const existing = readMembership();
-  const sameOrg = existing?.orgId === input.orgId;
-  const sameUser = existing?.userId === input.userId;
+  const next = membershipRecord(input, existing);
+  if (!next.userId || !next.orgId || !next.orgName) return;
   writeMembership({
-    userId: input.userId,
-    email: input.email,
-    orgId: input.orgId,
-    orgName: input.orgName,
-    inviteCode: input.inviteCode || (sameOrg ? existing?.inviteCode ?? null : null),
-    displayName: input.displayName || (sameUser ? existing?.displayName : undefined),
+    userId: next.userId,
+    email: next.email || "",
+    orgId: next.orgId,
+    orgName: next.orgName,
+    inviteCode: null,
+    displayName: next.displayName,
   });
 }

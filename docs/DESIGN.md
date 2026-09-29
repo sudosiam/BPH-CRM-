@@ -1,20 +1,20 @@
 # BPH CRM
 
-BPH is a mobile CRM with four jobs: keep a lead, remember the follow-up date, and mark it Sold or Lost. It is shared by a small team. The phone keeps a full copy of the book so the app opens immediately, including offline. Supabase is the shared database.
+BPH is a mobile CRM for a shared book of leads. A lead is **Lead**, **Qualified**, **Sold**, or **Lost**. Follow-up is a date on Lead or Qualified. It is shared by a small team. The phone keeps a full copy of the book so the app opens immediately, including offline. Supabase is the shared database when it is configured. The SQL in `supabase/migrations` is the schema that gets applied.
 
 This document is the product and technical plan. The live styles are in `apps/web/src/styles.css`.
 
 ## Decisions
 
 1. One business has one shared book. Every member can see and edit every lead.
-2. A lead has one status: **Lead**, **Sold**, or **Lost**.
-3. A follow-up is a calendar date on a Lead. It is not a status.
-4. Each lead has one owner. The owner defaults to the person who created it. Only the owner gets push alerts for that lead.
+2. A lead has one status: **Lead**, **Qualified**, **Sold**, or **Lost**. Qualified is still open.
+3. A follow-up is a calendar date on Lead or Qualified. It is not a status.
+4. Each lead has one owner. The owner defaults to the person who created it. Only that owner gets the morning alert for that lead.
 5. **Today** opens on the signed-in person's follow-ups. An **All** switch shows the whole team.
 6. Follow-ups are dates, not times. The alert is a morning digest at a local time the person chooses. The default is 8:00.
 7. The app stores its working copy in IndexedDB on the device. The first successful sign-in on that phone copies the whole book, then every screen reads and writes the local copy.
 8. The phone does not upload anything until that first copy finishes. An empty local database cannot overwrite the team book.
-9. If someone else changed the lead first, the server copy stays and the app asks you to redo your edit.
+9. If someone else changed the lead first, the server copy is what the phone stores. The editor keeps the fields this phone changed, including status, sold amount, lost reason, history, and contact counts, so Save can send them again.
 10. The layout is one column. On a large screen that column sits in the center.
 11. Marking Sold or Lost clears the follow-up date, which stops reminders.
 12. A new lead defaults its follow-up to tomorrow. The person can clear it.
@@ -75,8 +75,10 @@ Three tabs:
 | Tab | Purpose |
 | --- | --- |
 | Today | Overdue, due today, and the next 7 days |
-| Leads | The whole book, split into Lead, Sold, and Lost |
-| You | Profile, team, reminders, sync |
+| Leads | The whole book, split into Lead, Qualified, Sold, and Lost |
+| Customers | Search across the book |
+
+You is the profile screen: team, invite code, reminders, and sign-out. It is not a tab.
 
 Pushed screens hide the tab bar: lead detail, new lead, edit lead, sign in, start, join, and the first-copy screen.
 
@@ -134,15 +136,15 @@ A lead with a follow-up more than 7 days away is not on Today. A text button sen
 
 ### Leads
 
-Search by name or phone. Segments: **Lead**, **Sold**, **Lost**, each with a count.
+Search by name or phone. Segments: **Lead**, **Qualified**, **Sold**, **Lost**, each with a count.
 
-Open leads sort by follow-up date, empty dates last. Sold and Lost sort by closed date, newest first. The secondary line is the due label, "No follow-up", or "Sold · 25 Sep" / "Lost · 25 Sep".
+Lead and Qualified sort by follow-up date, empty dates last. Sold and Lost sort by closed date, newest first. The secondary line is the due label, "No follow-up", or "Sold · 25 Sep" / "Lost · 25 Sep".
 
 ### Lead
 
-Large name, then the status control: Lead, Sold, Lost. One tap writes locally.
+Large name, then the status control: Lead, Qualified, Sold, Lost. One tap writes locally.
 
-Follow-up block shows only while the status is Lead: the date, quick choices (Tomorrow, In 3 days, Next week, No date), and a date field. Saving a date is immediate.
+Follow-up block shows while the status is Lead or Qualified: the date, quick choices (Tomorrow, In 3 days, Next week, No date), and a date field. Saving a date is immediate.
 
 Call and WhatsApp show when a phone number exists. Call uses `tel:`. WhatsApp uses `https://wa.me/` with digits only.
 
@@ -167,7 +169,7 @@ Save returns to the new lead. The list already contains it before the network an
 - Teammates
 - Invite code and copy
 - Reminders: on or off, and the local time (7:00, 8:00, 9:00, or 18:00)
-- A preview of that person's own morning alert
+- A preview of that person's own morning alert, counting only leads they own
 - Install note: on iPhone, add BPH to the Home Screen so alerts can arrive while the app is closed
 - Sync: "BPH keeps the full book on this phone. Changes show up right away, then sync to the rest of the team."
 - Sign out
@@ -222,7 +224,7 @@ Body rules:
 (now() at time zone profiles.timezone)::date
 ```
 
-`follow_up_on` is a `date`. An hourly job invokes a Supabase Edge Function. The function loads members whose local hour matches `notify_minute`, counts that owner's open leads, and sends Web Push only when the count is non-zero. VAPID keys stay on the server. The browser stores the push subscription in `push_subscriptions`.
+`follow_up_on` is a `date`. An hourly job invokes a Supabase Edge Function. The function loads members whose local time has reached `notify_minute`, counts open leads that person owns, and sends Web Push only when that count is non-zero. It does not alert the rest of the team about someone else's follow-ups. VAPID keys stay on the server. The browser stores the push subscription in `push_subscriptions`. The function accepts only a dedicated bearer secret, not the public anon key.
 
 Permission is requested from You, or from a card on Today after the first follow-up exists. The card is not a blocker. If permission is denied, Today still works and You says reminders are off.
 
@@ -268,7 +270,7 @@ Writes:
 3. When online, `update leads set ... where id = ? and version = baseVersion`.
 4. A database trigger sets `updated_at` and increments `version`.
 5. On one updated row, mark the outbox item done and store the server version.
-6. On zero rows, fetch the server lead, replace the local row, drop the outbox item, and tell the person: "This lead was updated by Nadia. Your change was not saved."
+6. On zero rows, fetch the server lead, replace the local row, drop the outbox item, and tell the person: "This lead was updated by Nadia. Your change was kept in the editor." Save sends those edits again.
 
 Pull:
 
@@ -295,13 +297,13 @@ flowchart TD
   owner --> push[Morning alert to that owner]
 ```
 
-Roles are owner and member. Both can create, edit, reassign, and soft-delete leads. The owner can regenerate the invite code and remove a member. Removing a member reassigns their leads to the owner and sets `removed_at` on the profile. The row stays so older leads can still show that person's name, and `current_org_id()` ignores removed profiles so they lose access. That same login cannot join a second business. A member cannot change their own role or business; that trigger blocks it.
+Roles are owner and member. Both can create, edit, and soft-delete leads. The owner can regenerate the invite code and remove a member. Removing a member sets `removed_at`. Their leads stay attributed to them until that profile moves to another business. Before `org_id` changes, lead references (`owner_id`, `created_by`, `updated_by`) move to someone who is still in the old business, in the same transaction. Same-org rejoin does not change `org_id`. The profile row stays so older leads can still show that person's name, and `current_org_id()` ignores removed profiles so they lose access. A member cannot change their own role or business; that trigger blocks it. The invite code is not stored in `localStorage`.
 
 Auth screens and these rules are the whole account model. There are no workspaces beyond the one business, and no per-lead privacy.
 
 ## Data model
 
-The planned schema is `docs/schema.sql`. It is the contract for the first Supabase migration. It is not applied yet.
+The schema contract is `supabase/migrations`. Apply those files on the Supabase project. `docs/schema.sql` is an older snapshot and can lag the migrations.
 
 Leads:
 
@@ -312,9 +314,9 @@ Leads:
 | `name` | Required, 1–120 characters |
 | `phone` | Optional, up to 40 characters |
 | `notes` | Optional, up to 2,000 characters |
-| `status` | `lead`, `sold`, or `lost` |
-| `follow_up_on` | Date, only while status is `lead` |
-| `closed_on` | Date, empty while status is `lead` |
+| `status` | `lead`, `qualified`, `sold`, or `lost` |
+| `follow_up_on` | Date, only while status is `lead` or `qualified` |
+| `closed_on` | Date, empty while the lead is open |
 | `owner_id` | Who is reminded |
 | `created_by`, `updated_by` | Profiles |
 | `version` | Integer, conflict check |
