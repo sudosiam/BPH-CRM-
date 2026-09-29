@@ -612,10 +612,11 @@ export function LeadsScreen() {
           : "No open leads yet";
   return (
     <>
-      <div className="segments">
+      <div className="segments segments-4">
         {STATUSES.map((status) => (
           <button key={status} type="button" className={book.segment === status ? "on" : ""} onClick={() => book.setSegment(status)}>
-            {labelStatus(status)} · {counts[status]}
+            <span>{labelStatus(status)}</span>
+            <span className="seg-n">{counts[status]}</span>
           </button>
         ))}
       </div>

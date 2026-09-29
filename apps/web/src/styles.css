@@ -199,6 +199,7 @@ a { color: inherit; }
   border-radius: 99px;
   background: var(--green);
   flex: 0 0 auto;
+  transition: background-color 180ms ease;
 }
 
 .sync-label.syncing::before { background: var(--due); }
@@ -401,10 +402,33 @@ h1 {
   color: var(--ink);
   box-shadow: 0 4px 12px rgba(40, 32, 20, 0.06);
 }
-.segments button, .status-switch button {
+.segments-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.segments-4 button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 52px;
+  padding: 6px 2px;
   font-size: 12px;
-  padding: 0 2px;
-  letter-spacing: -0.03em;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+.segments-4 .seg-n {
+  font-size: 11px;
+  font-weight: 800;
+}
+.status-switch button {
+  font-size: 13px;
+  letter-spacing: 0;
+  padding: 0 4px;
+}
+.segments button:active, .status-switch button:active {
+  transform: none;
 }
 
 .section-label {

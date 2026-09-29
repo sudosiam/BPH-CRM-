@@ -216,6 +216,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
   const waPending = useRef<string | null>(null);
   const lastSyncAt = useRef(0);
   const syncTimer = useRef(0);
+  const retryTimer = useRef(0);
+  const retryCount = useRef(0);
   const soldTimer = useRef(0);
   const soldSeq = useRef(0);
   const soldPending = useRef<{ id: string; amount: number | null; seq: number } | null>(null);
@@ -332,9 +334,13 @@ export function BookProvider({ children }: { children: ReactNode }) {
       }
       const pull = !recent || !opts?.force;
       let marked = false;
+      let showedSyncing = false;
+      const reveal = window.setTimeout(() => {
+        showedSyncing = true;
+        setSyncing(true);
+      }, 420);
       try {
         marked = true;
-        setSyncing(true);
         if (metaRow && !metaRow.fullSyncComplete) await runFullSync();
         await flushOutbox(showToast, (local, server) => {
           setConflictDraft({
@@ -362,7 +368,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
       } catch {
         setHeld(true);
       } finally {
-        if (marked) setSyncing(false);
+        window.clearTimeout(reveal);
+        if (marked && showedSyncing) setSyncing(false);
+        if (!signedOut.current && navigator.onLine) {
+          const left = await db.outbox.count();
+          window.clearTimeout(retryTimer.current);
+          if (left === 0) retryCount.current = 0;
+          else if (retryCount.current < 5) {
+            retryCount.current += 1;
+            retryTimer.current = window.setTimeout(() => {
+              void syncNow({ force: true });
+            }, 1200 * retryCount.current);
+          }
+        }
       }
     });
   }
@@ -1493,6 +1511,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
     const epoch = ++authEpoch.current;
     signedOut.current = true;
     window.clearTimeout(syncTimer.current);
+    window.clearTimeout(retryTimer.current);
     setHttpToken("");
     setUserId("");
     setEmail("");
