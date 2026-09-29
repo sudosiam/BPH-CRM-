@@ -155,6 +155,9 @@ export function createHttpRemote() {
       if (!response.ok) throw new Error(data.error || "Could not save.");
       return data.profile as Profile;
     },
+    async qualifiedReady() {
+      return true;
+    },
     async pull(cursor: string | null): Promise<Pull> {
       const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
       const { response, data } = await request(`/api/sync/pull${query}`);

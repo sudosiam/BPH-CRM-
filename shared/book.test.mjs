@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { customerMatches, digestCounts, followUpResult, isOpenStatus, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO, addedRecently } from "./book.mjs";
+import { customerMatches, digestCounts, followUpResult, isOpenStatus, leadEditPatch, mergeLead, mergeLeadFields, normalizeTags, qualifiedSchemaError, encodeQualifiedLead, decodeQualifiedLead, historyMarksQualified, soldThisMonth, quietDays, appendHistory, syncStatusLabel, todayISO, addedRecently } from "./book.mjs";
 
 test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(leadEditPatch({ status: "lead", ownerId: "a" }, { phone: " 017 ", notes: " hi ", source: "Phone", tags: ["Scooty", "Nope"], followUpOn: "2026-10-01" }, " Rina ").followUpOn, "2026-10-01");
@@ -9,6 +9,22 @@ test("follow-up results, monthly sold total, and a bad time zone", () => {
   assert.equal(leadEditPatch({ status: "qualified", ownerId: "a" }, { phone: "", notes: "", source: null, tags: [], followUpOn: "2026-10-01" }, "Rina").followUpOn, "2026-10-01");
   assert.equal(isOpenStatus("qualified"), true);
   assert.equal(isOpenStatus("sold"), false);
+  assert.equal(qualifiedSchemaError('invalid input value for enum lead_status: "qualified"'), true);
+  assert.equal(qualifiedSchemaError('new row for relation "leads" violates check constraint "follow_up_only_for_leads"'), true);
+  assert.equal(qualifiedSchemaError('new row for relation "leads" violates check constraint "open_leads_are_not_closed"'), true);
+  assert.equal(qualifiedSchemaError("Could not sync."), false);
+  const encoded = encodeQualifiedLead({ status: "qualified", closedOn: "2026-09-01", history: "2026-09-01 · Added", followUpOn: "2026-09-02" });
+  assert.equal(encoded.status, "lead");
+  assert.equal(encoded.closedOn, null);
+  assert.equal(encoded.followUpOn, "2026-09-02");
+  assert.equal(historyMarksQualified(encoded.history), true);
+  assert.equal(historyMarksQualified(encodeQualifiedLead(encoded).history), true);
+  const decoded = decodeQualifiedLead(encoded);
+  assert.equal(decoded.status, "qualified");
+  assert.equal(decoded.closedOn, null);
+  assert.equal(decoded.history, "2026-09-01 · Added");
+  assert.equal(decodeQualifiedLead({ status: "sold", history: encoded.history, closedOn: "2026-09-03" }).status, "sold");
+  assert.equal(decodeQualifiedLead({ status: "lead", history: "2026-09-01 · Added" }).status, "lead");
   assert.equal(followUpResult("no-answer", "2026-09-26", "2026-09-20").followUpOn, "2026-09-27");
   assert.equal(followUpResult("no-answer", "2026-09-26", "2026-09-20", "qualified").status, "qualified");
   assert.equal(followUpResult("not-interested", "2026-09-26", "2026-09-27", "qualified").status, "lost");

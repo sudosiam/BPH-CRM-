@@ -62,6 +62,52 @@ export function isOpenStatus(status) {
   return status === "lead" || status === "qualified";
 }
 
+// The live book is a Postgres enum. Until `qualified` is added there, a save
+// with that status is rejected and the change stays on the phone forever.
+export function qualifiedSchemaError(message) {
+  const text = String(message || "");
+  return /invalid input value for enum lead_status/i.test(text)
+    || /follow_up_only_for_leads/i.test(text)
+    || /open_leads_are_not_closed/i.test(text);
+}
+
+// The live book may not have `qualified` in its status list yet. A hidden
+// history line keeps the status while the saved row stays a normal lead.
+export const QUALIFIED_MARK = "§qualified";
+
+export function historyMarksQualified(history) {
+  return String(history || "").split("\n").includes(QUALIFIED_MARK);
+}
+
+export function markQualifiedHistory(history) {
+  const lines = String(history || "").split("\n").filter((line) => line && line !== QUALIFIED_MARK);
+  return [QUALIFIED_MARK, ...lines].join("\n");
+}
+
+export function unmarkQualifiedHistory(history) {
+  return String(history || "")
+    .split("\n")
+    .filter((line) => line !== QUALIFIED_MARK)
+    .join("\n");
+}
+
+export function encodeQualifiedLead(lead) {
+  if (!lead || lead.status !== "qualified") return lead;
+  return {
+    ...lead,
+    status: "lead",
+    closedOn: null,
+    history: markQualifiedHistory(lead.history),
+  };
+}
+
+export function decodeQualifiedLead(lead) {
+  if (!lead || !historyMarksQualified(lead.history)) return lead;
+  const history = unmarkQualifiedHistory(lead.history);
+  if (lead.status !== "lead") return { ...lead, history };
+  return { ...lead, status: "qualified", closedOn: null, history };
+}
+
 export function digestCounts(leads, today, ownerId) {
   const rows = leads.filter((lead) => {
     if (lead.deletedAt || !isOpenStatus(lead.status) || !lead.followUpOn) return false;

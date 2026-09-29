@@ -314,8 +314,9 @@ export async function flushOutbox(
     if (!items.length) return;
     let progressed = false;
     for (const item of items) {
+      let lead: Lead | undefined;
       try {
-        const lead = await db.leads.get(item.id);
+        lead = await db.leads.get(item.id);
         if (!lead) {
           await db.outbox.delete(item.id);
           progressed = true;
