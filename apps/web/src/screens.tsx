@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, isOpenStatus, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO } from "@shared/book.mjs";
+import { addDays, addedRecently, CUSTOMER_TAGS, customerMatches, dayDiff, digestCounts, digestLine, dueMeta, initials, isOpenStatus, LEAD_SOURCES, LOST_REASONS, longDate, normalizeTags, prettyDate, quietDays, relativeTime, soldThisMonth, todayISO, unmarkQualifiedHistory } from "@shared/book.mjs";
 import { useBook, type Draft } from "./book";
 import { db } from "./db";
 import type { Lead, Profile } from "./types";
@@ -830,7 +830,7 @@ export function DetailScreen() {
   const due = dueMeta(lead.followUpOn, today);
   const adder = ownerName(book.profiles, lead.createdBy || lead.ownerId, book.me);
   const recent = activity.slice(-8).reverse();
-  const historyLines = (lead.history || "")
+  const historyLines = unmarkQualifiedHistory(lead.history || "")
     .split("\n")
     .filter(Boolean)
     .slice(-8)

@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { normalizeTags, pullSince, qualifiedSchemaError } from "@shared/book.mjs";
+import { decodeQualifiedLead, encodeQualifiedLead, normalizeTags, pullSince, qualifiedSchemaError } from "@shared/book.mjs";
 import type { Account, Lead, Org, Profile, Pull, PushResult } from "./types";
 
 export function resolveSupabaseUrl(value: string | undefined) {
@@ -34,6 +34,10 @@ function mapLead(row: Record<string, unknown>): Lead {
     contactCount: Number(row.contact_count ?? 0),
     history: String(row.history ?? ""),
   };
+}
+
+function readLead(row: Record<string, unknown>): Lead {
+  return decodeQualifiedLead(mapLead(row));
 }
 
 function mapProfile(row: Record<string, unknown>): Profile {
@@ -101,6 +105,41 @@ function appReturnUrl() {
 function isNetworkError(error: { message?: string } | null) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("fetch") || message.includes("network") || message.includes("offline") || message.includes("load failed");
+}
+
+async function writeLead(supabase: SupabaseClient, row: Record<string, unknown>, id: string, baseVersion: number | null): Promise<PushResult> {
+  if (baseVersion == null) {
+    let { data, error } = await supabase.from("leads").insert(row).select("*").single();
+    if (error && missingColumn(error)) {
+      const retry = await supabase.from("leads").insert(withoutLeadExtras(row)).select("*").single();
+      data = retry.data;
+      error = retry.error;
+    }
+    if (!error && data) return { ok: true, lead: readLead(data) };
+    const duplicate = error?.code === "23505" || /duplicate key/i.test(error?.message || "");
+    if (duplicate) {
+      const current = await supabase.from("leads").select("*").eq("id", id).maybeSingle();
+      if (current.error) throw new Error(current.error.message);
+      if (current.data) return { ok: false, lead: readLead(current.data), deleted: Boolean(current.data.deleted_at) };
+    }
+    throw new Error(error?.message || "Could not sync.");
+  }
+  let { data, error } = await supabase.from("leads").update(row).eq("id", id).eq("version", baseVersion).select("*").maybeSingle();
+  if (error && missingColumn(error)) {
+    const retry = await supabase.from("leads").update(withoutLeadExtras(row)).eq("id", id).eq("version", baseVersion).select("*").maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) throw new Error(error.message);
+  if (!data) {
+    const current = await supabase.from("leads").select("*").eq("id", id).maybeSingle();
+    return {
+      ok: false,
+      lead: current.data ? readLead(current.data) : null,
+      deleted: Boolean(current.data?.deleted_at) || !current.data,
+    };
+  }
+  return { ok: true, lead: readLead(data) };
 }
 
 async function everyRow(
@@ -347,48 +386,24 @@ export function createSupabaseRemote() {
       if (timeError) throw new Error(timeError.message);
       return {
         serverTime: String(serverTime),
-        leads: (leadRows ?? []).map((row) => mapLead(row)),
+        leads: (leadRows ?? []).map((row) => readLead(row)),
         profiles: (profileRows ?? []).map((row) => mapProfile(row)),
         org: account.org,
       };
     },
     async pushLead(lead: Lead, baseVersion: number | null): Promise<PushResult> {
       const userId = (await supabase.auth.getUser()).data.user?.id ?? lead.updatedBy;
-      const row = toRow(lead, userId);
-      if (baseVersion == null) {
-        let { data, error } = await supabase.from("leads").insert(row).select("*").single();
-        if (error && missingColumn(error)) {
-          const retry = await supabase.from("leads").insert(withoutLeadExtras(row)).select("*").single();
-          data = retry.data;
-          error = retry.error;
+      const send = (payload: Lead) => writeLead(supabase, toRow(payload, userId), payload.id, baseVersion);
+      if (lead.status !== "qualified") return send(lead);
+      if (await this.qualifiedReady()) {
+        try {
+          return await send(lead);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!qualifiedSchemaError(message)) throw error;
         }
-        if (!error && data) return { ok: true, lead: mapLead(data) };
-        const duplicate = error?.code === "23505" || /duplicate key/i.test(error?.message || "");
-        if (duplicate) {
-          const current = await supabase.from("leads").select("*").eq("id", lead.id).maybeSingle();
-          if (current.error) throw new Error(current.error.message);
-          if (current.data) {
-            return { ok: false, lead: mapLead(current.data), deleted: Boolean(current.data.deleted_at) };
-          }
-        }
-        throw new Error(error?.message || "Could not sync.");
       }
-      let { data, error } = await supabase.from("leads").update(row).eq("id", lead.id).eq("version", baseVersion).select("*").maybeSingle();
-      if (error && missingColumn(error)) {
-        const retry = await supabase.from("leads").update(withoutLeadExtras(row)).eq("id", lead.id).eq("version", baseVersion).select("*").maybeSingle();
-        data = retry.data;
-        error = retry.error;
-      }
-      if (error) throw new Error(error.message);
-      if (!data) {
-        const current = await supabase.from("leads").select("*").eq("id", lead.id).maybeSingle();
-        return {
-          ok: false,
-          lead: current.data ? mapLead(current.data) : null,
-          deleted: Boolean(current.data?.deleted_at) || !current.data,
-        };
-      }
-      return { ok: true, lead: mapLead(data) };
+      return send(encodeQualifiedLead(lead));
     },
     async vapidPublicKey() {
       return import.meta.env.VITE_VAPID_PUBLIC_KEY || null;

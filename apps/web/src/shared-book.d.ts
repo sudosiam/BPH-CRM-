@@ -8,6 +8,12 @@ declare module "@shared/book.mjs" {
   export function digestLine(dueToday: number, overdue: number): string;
   export function isOpenStatus(status: string | null | undefined): boolean;
   export function qualifiedSchemaError(message: string | null | undefined): boolean;
+  export const QUALIFIED_MARK: string;
+  export function historyMarksQualified(history: string | null | undefined): boolean;
+  export function markQualifiedHistory(history: string | null | undefined): string;
+  export function unmarkQualifiedHistory(history: string | null | undefined): string;
+  export function encodeQualifiedLead<T extends { status?: string; closedOn?: string | null; history?: string | null }>(lead: T): T;
+  export function decodeQualifiedLead<T extends { status?: string; closedOn?: string | null; history?: string | null }>(lead: T): T;
   export function digestCounts(
     leads: Array<{ deletedAt?: string | null; status: string; followUpOn?: string | null; ownerId?: string; createdBy?: string }>,
     today: string,
